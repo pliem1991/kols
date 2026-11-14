@@ -21,9 +21,20 @@ these: they need the password, a payment method, or identity verification.
 
 Creator Revenue Sharing was retired 2026-09-07. The current program needs:
 
+Số thật, đọc từ chính trang eligibility của X ngày 14/11
+(`x.com/i/jf/creators/original_content_rewards`):
+
 - [ ] Active **Premium, Premium+ or Premium Business** — Basic does not qualify
-- [x] 500+ verified followers — 762, cleared
-- [ ] **500,000 verified Home Timeline impressions / 90 days**, replies excluded
+- [ ] 500 **verified** followers — **đang có 29**, KHÔNG phải 762
+- [ ] **500,000 verified Home Timeline impressions / 90 days** — **đang có 8**
+
+**Sửa lỗi 14/11:** trước đó ghi "762 follower, đã qua mốc 500". Sai. X đếm
+**verified follower** (người có Premium), không đếm tổng follower. 762 tổng thì
+chỉ 29 là verified. Mốc 500 chưa qua, còn xa.
+
+Con số 8 impression/90 ngày cũng là số X dùng để trả tiền — khác hẳn `viewCount`
+mà `app/stats.py` đọc được (tổng lượt xem, ai xem cũng tính). Khoảng cách tới
+500.000 không phải chuyện tinh chỉnh nội dung.
 - [ ] Stripe payout account + identity verification (Vietnam is a supported
       payout country)
 
