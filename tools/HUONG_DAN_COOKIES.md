@@ -47,7 +47,8 @@ Nếu hiện "Test OK! Found @elonmusk — xxx followers" là thành công.
 ```
 python kol_scanner.py --top 10
 ```
-Sẽ scan 17 KOLs và hiện top 10 bài hot nhất trong 48h qua.
+Sẽ scan 17 KOLs và hiện top 10 bài hot nhất trong 12h qua (mốc mặc định).
+Muốn đổi cửa sổ thời gian: `python kol_scanner.py --top 10 --hours 24`
 
 ## Lưu ý
 - Cookies hết hạn sau ~1 năm, nhưng có thể bị revoke nếu đổi password

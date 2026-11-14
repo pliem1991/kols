@@ -46,7 +46,7 @@ Post a reply on X via Chrome browser automation.
 - **English only**: All replies to international KOLs
 - **Add value**: Insight, counter-point, data — NOT "great post!"
 - **No shilling**: Don't mention own tokens or promote anything
-- **Verify freshness**: Check post is still recent before replying
+- **Verify freshness**: Only reply to posts from the last 12h (scanner default window)
 - **Mix strategies**: Combine direct replies with quote tweets for variety
 
 ## KOL Tiers
@@ -55,7 +55,8 @@ Post a reply on X via Chrome browser automation.
 - **Tier 3** (AI crossover): @AndrewYNg, @ylecun, @balajis, @emollick
 
 ## Scanning for Fresh Posts
-Use `tools/kol_scanner.py` with twscrape to find hot posts:
+Use `tools/kol_scanner.py` with twscrape to find hot posts (default window: last 12h):
 ```bash
 python tools/kol_scanner.py --top 10
 ```
+Override the window if needed: `python tools/kol_scanner.py --top 10 --hours 24`

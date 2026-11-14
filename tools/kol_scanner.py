@@ -1,6 +1,7 @@
 """
 KOL Scanner — Find hot posts from target KOLs for reply engagement
-Usage: python kol_scanner.py [--top N]
+Usage: python kol_scanner.py [--top N] [--hours H]
+Default window is 12h (per reply_scheduler workflow freshness rule).
 """
 import asyncio
 import json
@@ -35,7 +36,9 @@ TARGET_KOLS = [
     "ylecun",
 ]
 
-async def scan_kol(api: API, username: str, hours_back: int = 48):
+DEFAULT_HOURS = 12
+
+async def scan_kol(api: API, username: str, hours_back: int = DEFAULT_HOURS):
     """Get recent tweets from a KOL, sorted by engagement."""
     try:
         user = await api.user_by_login(username)
@@ -70,13 +73,18 @@ async def main():
         idx = sys.argv.index("--top")
         top_n = int(sys.argv[idx + 1])
 
+    hours_back = DEFAULT_HOURS
+    if "--hours" in sys.argv:
+        idx = sys.argv.index("--hours")
+        hours_back = int(sys.argv[idx + 1])
+
     api = API(str(DB_PATH))
-    print(f"Scanning {len(TARGET_KOLS)} KOLs for hot posts (last 48h)...\n")
+    print(f"Scanning {len(TARGET_KOLS)} KOLs for hot posts (last {hours_back}h)...\n")
 
     results = []
     for kol in TARGET_KOLS:
         print(f"  Scanning @{kol}...", end=" ", flush=True)
-        result = await scan_kol(api, kol)
+        result = await scan_kol(api, kol, hours_back)
         if "error" in result:
             print(f"ERROR: {result['error']}")
         else:
