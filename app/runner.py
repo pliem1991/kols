@@ -13,7 +13,8 @@ from pathlib import Path
 
 from anthropic import AuthenticationError
 
-from . import brain, chart, config, manual, review, scan, state, stats, web, xnews
+from . import (brain, chart, config, manual, payout, review, scan, state,
+               stats, web, xnews)
 from .config import ConfigError, load_settings
 from .x_browser import LoginExpired, XBrowser, XError
 
@@ -351,10 +352,24 @@ async def do_reply(s, st: state.DayState) -> bool:
              if not st.already_touched(c["id"]) and st.can_reply_to(c["handle"])]
 
     if not fresh:
-        log(f"  chưa ai tương tác ({len(cands)} lượt, đều đã trả lời hoặc hết "
-            f"hạn mức). Account còn nhỏ thì đây là chuyện bình thường.")
+        # Chủ dự án chốt 14/11: trong lúc chưa có Premium và chưa có tiền để
+        # mất, chấp nhận rủi ro và reply cả bài của danh sách KOL. Biết rõ đây
+        # là thứ Automation rules của X không cho phép (người nhận chưa opt-in,
+        # xem phần đầu workflows/reply_scheduler.md) — đã nêu, đã được xác nhận.
+        log(f"  chưa ai tương tác ({len(cands)} lượt) -> quét danh sách KOL "
+            f"(dưới {config.REPLY_FRESH_MIN} phút)")
+        try:
+            rows = await scan.find_candidates(window_min=config.REPLY_FRESH_MIN,
+                                              top_n=15)
+            fresh = [c for c in rows if not st.already_touched(c["id"])
+                     and st.can_reply_to(c["handle"])]
+        except Exception as e:
+            log(f"  quét KOL lỗi: {type(e).__name__}: {e}")
+
+    if not fresh:
+        log("  không có target nào.")
         return False
-    log(f"  {len(fresh)} lượt chờ trả lời")
+    log(f"  {len(fresh)} bài chờ reply")
 
     for cand in fresh[:3]:
         text, reason = brain.compose_reply(s, cand)
@@ -475,10 +490,31 @@ async def loop(s, once: bool = False) -> None:
     try:
         acc = await xnews.account_stats(s.account_handle)
         if acc:
-            log(f"@{acc['handle']}: {acc['followers']:,} follower "
-                f"(mốc payout: 500)")
+            # KHÔNG ghi "mốc payout: 500" ở đây nữa: X đếm verified follower
+            # (29), không đếm tổng (762). Mốc nằm ở dòng payout bên dưới.
+            log(f"@{acc['handle']}: {acc['followers']:,} follower tổng "
+                f"(payout xét theo verified follower, xem dòng payout)")
     except Exception as e:
         log(f"không đọc được chỉ số account: {type(e).__name__}: {e}")
+    # Hai con số X dùng để xét payout. Cần cookie acc chính nên chỉ chạy khi
+    # --live; dry-run thì bỏ qua, không mở browser.
+    if not s.dry_run and payout.due():
+        try:
+            async with XBrowser(s) as b:
+                row = await b.eligibility()
+            if row:
+                payout.record(row)
+                p = payout.progress()
+                log(f"payout: {p['followers']}/{p['need_followers']} verified "
+                    f"follower · {p['impressions']:,}/{p['need_impressions']:,} "
+                    f"impression 90 ngày")
+                if p.get("week"):
+                    log(f"  7 ngày qua: {p['week']['gain']:+d} verified follower"
+                        + (f" -> còn ~{p['eta_days']} ngày tới mốc 500"
+                           if p.get("eta_days") else ""))
+        except Exception as e:
+            log(f"không đọc được chỉ số payout: {type(e).__name__}: {e}")
+
     # Kết quả thật của các bài đã đăng. Không có bước này thì app soạn mãi mà
     # không bao giờ biết chủ đề nào có người đọc.
     try:

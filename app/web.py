@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import config, manual, review, state, stats
+from . import config, manual, payout, review, state, stats
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8787
@@ -146,6 +146,15 @@ button:disabled{opacity:.55;cursor:default}
  color:var(--acc);font-weight:600;margin-right:8px}
 .pill.g{background:var(--ok-soft);color:var(--ok)}
 .empty{color:var(--mut);font-size:13.5px;padding:6px 0}
+.pgrid{display:grid;grid-template-columns:1fr 1fr;gap:26px}
+@media (max-width:760px){.pgrid{grid-template-columns:1fr;gap:18px}}
+.big{font-size:30px;font-weight:700;letter-spacing:-.02em;line-height:1.25;
+ margin:2px 0 10px}
+.big .mut{font-size:17px;font-weight:600}
+.bar{height:8px;background:var(--bg);border-radius:99px;overflow:hidden;
+ margin:0 0 8px}
+.bar i{display:block;height:100%;background:var(--acc);border-radius:99px;
+ min-width:2px}
 .note{color:var(--warn);font-size:13px}
 img.shot{max-width:100%;border:1px solid var(--line);border-radius:11px;margin:0 0 12px}
 @media (max-width:820px){
@@ -162,6 +171,7 @@ img.shot{max-width:100%;border:1px solid var(--line);border-radius:11px;margin:0
   <div class="brand"><i>X</i>XKols</div>
   <a class="nav on" onclick="go('s-stat',this)">Tổng quan</a>
   <a class="nav" onclick="go('s-manual',this)">Việc làm tay<span class="n" id="n-manual"></span></a>
+  <a class="nav" onclick="go('s-payout',this)">Đường tới payout</a>
   <a class="nav" onclick="go('s-stats',this)">Kết quả thật</a>
   <a class="nav" onclick="go('s-pending',this)">Chờ duyệt<span class="n" id="n-pending"></span></a>
   <a class="nav" onclick="go('s-posted',this)">Đã đăng<span class="n" id="n-posted"></span></a>
@@ -301,14 +311,40 @@ async function load(){
     + stat('▦','i4', d.images, 'bài có ảnh')
     + '</div>';
 
+  const py = d.payout || {};
+  if(py.followers !== undefined){
+    const w = py.week;
+    h += '<div class="card" id="s-payout"><div class="chead"><div>'
+      + '<h2>Đường tới payout</h2>'
+      + '<p class="sub">Hai con số X dùng để xét, đọc thẳng từ trang eligibility '
+      + '— không phải follower tổng, không phải view.</p></div>'
+      + '<span class="chip">đo lúc <b>'
+      + esc(String(py.at).slice(5,16).replace("T"," "))+'</b></span></div>'
+      + '<div class="pgrid">'
+      + '<div><div class="tag">verified follower</div>'
+      + '<div class="big">'+py.followers+'<span class="mut"> / '+py.need_followers+'</span></div>'
+      + '<div class="bar"><i style="width:'+py.pct+'%"></i></div>'
+      + '<div class="sub">'+(w ? (w.gain>=0?'+':'')+w.gain+' trong '+w.days+' ngày'
+          + (py.eta_days ? ' · còn ~'+py.eta_days+' ngày tới mốc'
+             : ' · chưa tăng nên chưa ước lượng được')
+          : 'cần thêm một lần đo nữa mới thấy xu hướng')+'</div></div>'
+      + '<div><div class="tag">verified impression / 90 ngày</div>'
+      + '<div class="big">'+Number(py.impressions).toLocaleString()
+      + '<span class="mut"> / '+Number(py.need_impressions).toLocaleString()+'</span></div>'
+      + '<div class="bar"><i style="width:'
+      + Math.min(100, py.impressions/py.need_impressions*100).toFixed(3)+'%"></i></div>'
+      + '<div class="sub">reply KHÔNG được tính vào con số này</div></div>'
+      + '</div></div>';
+  }
+
   h += '<div class="card"><div class="chead"><div>'
     + '<h2>Nhịp hôm nay</h2><p class="sub">bài kế '+d.next_post
     + ' · reply kế '+d.next_reply+'</p></div>'
     + '<span class="chip">chủ đề kế <b>'+esc(d.pillar_next)+'</b></span></div>'
     + '<div class="sub">Đã dùng: '+(d.pillars_used.map(esc).join(', ')||'chưa có')
     + '<br>Hạn mức/ngày: '+d.limits.replies+' reply · '+d.limits.quotes+' quote · '
-    + d.limits.images+' bài có ảnh. Reply tự động CHỈ dành cho người đã tương tác '
-    + 'với mình.</div></div>';
+    + d.limits.images+' bài có ảnh. Reply tự động: ưu tiên người đã tương tác '
+    + 'với mình, không có thì quét danh sách KOL.</div></div>';
 
   const ms = d.manual_sum || {acts:{}, closed:0};
   const rf = d.refill || {};
@@ -526,6 +562,7 @@ def _state_payload() -> dict:
         ],
         "manual_sum": manual.summary(),
         "stats": stats.cached(),
+        "payout": payout.progress(),
         "refill": dict(_REFILL),
         "models": {"post": config.MODEL_POST, "reply": config.MODEL_REPLY,
                    "vi": config.MODEL_TRANSLATE},

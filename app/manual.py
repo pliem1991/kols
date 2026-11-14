@@ -23,8 +23,8 @@ LOCK = threading.Lock()
 # Mỗi mục gợi ý 4 việc. reply là việc chính, 3 cái kia là tuỳ bạn.
 ACTS = ("reply", "like", "follow", "bookmark")
 
-QUEUE_MAX = 5          # số mục giữ trong hàng đợi (chốt 14/11)
-REFILL_AT = 3          # còn dưới ngần này thì nạp thêm
+QUEUE_MAX = 10         # đủ 10 mục/ngày để reply tay (chốt 14/11)
+REFILL_AT = 5          # còn dưới ngần này thì nạp thêm
 
 # Khoảng cách tối thiểu giữa hai lần TỰ nạp. Không có nó thì vòng lặp nạp lại
 # mỗi 6-15 phút (nhịp reply khi không có target) -> acc phụ twscrape dính rate
@@ -65,6 +65,11 @@ class Item:
     @property
     def open(self) -> bool:
         return not self.closed
+
+
+def _unescape(s: str) -> str:
+    import html
+    return html.unescape(s or "")
 
 
 def _path() -> "config.Path":
@@ -156,7 +161,9 @@ async def refill(settings, want: int = QUEUE_MAX) -> dict:
         new.append(Item(
             id=c["id"], author=c["handle"], url=c["url"],
             followers=c["followers"], age_min=c["age_min"],
-            replies=c["replies"], their_text=c["text"], draft=text,
+            # X trả rawContent còn nguyên entity HTML ("&amp;"), đưa thẳng lên
+            # trang là hiện ra chữ "&amp;" chứ không phải "&".
+            replies=c["replies"], their_text=_unescape(c["text"]), draft=text,
             created_at=config.now().isoformat(),
         ))
     if not new:

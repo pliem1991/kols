@@ -299,6 +299,42 @@ class XBrowser:
             raise XError("Repost không xác nhận được — kiểm tay")
         return True
 
+    ELIGIBILITY_URL = "https://x.com/i/jf/creators/original_content_rewards"
+
+    async def eligibility(self) -> dict | None:
+        """Hai con số X dùng để xét payout: verified follower và verified
+        impression 90 ngày.
+
+        Đây KHÔNG phải follower tổng (762) hay viewCount (app/stats.py đọc
+        được). Ngày 14/11 trang này trả 29 và 8, trong khi tổng follower là
+        762 — chênh nhau 26 lần, nên phải đọc đúng nguồn này chứ không suy ra.
+
+        Chỉ đọc, không bấm gì. Trả None nếu không tìm thấy số.
+        """
+        assert self.page
+        await self.page.goto(self.ELIGIBILITY_URL, wait_until="domcontentloaded",
+                             timeout=45_000)
+        await asyncio.sleep(3.0)
+        await self._check_soft_lock()
+        body = await self.page.inner_text("body")
+        flat = re.sub(r"\s+", " ", body)
+
+        def after(phrase: str) -> int | None:
+            # Con số nằm NGAY SAU dòng điều kiện, không có nhãn riêng.
+            i = flat.lower().find(phrase.lower())
+            if i < 0:
+                return None
+            m = re.search(r"\b(\d[\d,]*)\b", flat[i + len(phrase): i + len(phrase) + 60])
+            return int(m.group(1).replace(",", "")) if m else None
+
+        followers = after("Verified followers")
+        impressions = after("impressions in the last 90 days")
+        if followers is None and impressions is None:
+            await self._shot("eligibility-unreadable")
+            return None
+        return {"verified_followers": followers, "impressions_90d": impressions,
+                "at": config.now().isoformat()}
+
     async def post_age_minutes(self, target_url: str) -> float | None:
         """Tuổi thật của bài, tính từ thẻ <time> NẰM TRONG link chứa status id.
 

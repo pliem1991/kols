@@ -79,3 +79,16 @@ already cleared and account age from 2021 counts for something.
 
 Password entry, login, Premium purchase, Stripe/identity verification, handle
 changes. The owner does these by hand.
+
+## Theo dõi tự động (app/payout.py, thêm 14/11)
+
+`XBrowser.eligibility()` mở `x.com/i/jf/creators/original_content_rewards` bằng
+cookie acc chính và đọc đúng hai con số X dùng để xét. Chạy tối đa 12 giờ một
+lần, ghi một dòng mỗi ngày vào `posts/.state/payout.json`, hiện trên dashboard
+ở mục "Đường tới payout" kèm thanh tiến độ và tốc độ 7 ngày.
+
+Chỉ số DẪN ĐƯỜNG là **verified follower**, không phải view. 29 → 500 mới là
+đường đi; view lên xuống không nói lên điều gì vì người xem không có Premium
+thì không tính một impression nào.
+
+Đo lần đầu 14/11: 29 verified follower, 8 impression / 90 ngày.
