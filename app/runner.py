@@ -13,7 +13,7 @@ from pathlib import Path
 
 from anthropic import AuthenticationError
 
-from . import brain, chart, config, manual, review, scan, state, web, xnews
+from . import brain, chart, config, manual, review, scan, state, stats, web, xnews
 from .config import ConfigError, load_settings
 from .x_browser import LoginExpired, XBrowser, XError
 
@@ -150,7 +150,8 @@ async def do_thread(s, st: state.DayState) -> bool:
     if s.dry_run:
         dry_write("THREAD", "\n\n---\n\n".join(parts),
                   f"{len(parts)} bài" + (f" · ảnh: {image}" if image else ""))
-        st.record_post("morning", "DRY", parts[0], kind="thread")
+        st.record_post("morning", "DRY", parts[0], kind="thread",
+                       pillar="track_record", image=image or "")
         if image:
             st.images_used.append(image)
         log(f"  [dry] thread {len(parts)} bài"
@@ -161,7 +162,8 @@ async def do_thread(s, st: state.DayState) -> bool:
         url = await b.post_thread(parts, image)
     if image:
         st.images_used.append(image)
-    st.record_post("morning", url or "?", parts[0], kind="thread")
+    st.record_post("morning", url or "?", parts[0], kind="thread",
+                   pillar="track_record", image=image or "")
     state.append_log("post", {"url": url or "?", "chars": len(parts[0]),
                               "text": f"THREAD({len(parts)}) " + parts[0]})
     log(f"  đã đăng thread: {url or '(không bắt được URL)'}")
@@ -234,7 +236,8 @@ async def do_post(s, st: state.DayState, window: config.Window) -> bool:
 
     if s.dry_run:
         dry_write("POST", text, f"ảnh: {image}" if image else "")
-        st.record_post(window.name, "DRY", text)
+        st.record_post(window.name, "DRY", text, pillar=pillar,
+                       image=image or "")
         if image:
             st.images_used.append(image)
         log(f"  [dry] {len(text)} ký tự"
@@ -245,7 +248,8 @@ async def do_post(s, st: state.DayState, window: config.Window) -> bool:
         url = await b.post(text, image)
     if image:
         st.images_used.append(image)
-    st.record_post(window.name, url or "?", text)
+    st.record_post(window.name, url or "?", text, pillar=pillar,
+                   image=image or "")
     state.append_log("post", {"url": url or "?", "chars": len(text), "text": text})
     log(f"  đã đăng: {url or '(không bắt được URL)'}")
     return True
@@ -475,6 +479,18 @@ async def loop(s, once: bool = False) -> None:
                 f"(mốc payout: 500)")
     except Exception as e:
         log(f"không đọc được chỉ số account: {type(e).__name__}: {e}")
+    # Kết quả thật của các bài đã đăng. Không có bước này thì app soạn mãi mà
+    # không bao giờ biết chủ đề nào có người đọc.
+    try:
+        sd = await stats.collect(s.account_handle)
+        if sd["rows"]:
+            avg = sum(r["views"] for r in sd["rows"]) / len(sd["rows"])
+            log(f"kết quả {len(sd['rows'])} bài gần nhất: trung bình "
+                f"{avg:.0f} view/bài")
+            for p, v in list(sd["by_pillar"].items())[:3]:
+                log(f"  {p}: {v['views']:.0f} view/bài ({v['n']} bài)")
+    except Exception as e:
+        log(f"không đọc được kết quả bài cũ: {type(e).__name__}: {e}")
 
     while True:
         if config.STOP_FILE.exists():

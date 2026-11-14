@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import config, manual, review, state
+from . import config, manual, review, state, stats
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8787
@@ -162,6 +162,7 @@ img.shot{max-width:100%;border:1px solid var(--line);border-radius:11px;margin:0
   <div class="brand"><i>X</i>XKols</div>
   <a class="nav on" onclick="go('s-stat',this)">Tổng quan</a>
   <a class="nav" onclick="go('s-manual',this)">Việc làm tay<span class="n" id="n-manual"></span></a>
+  <a class="nav" onclick="go('s-stats',this)">Kết quả thật</a>
   <a class="nav" onclick="go('s-pending',this)">Chờ duyệt<span class="n" id="n-pending"></span></a>
   <a class="nav" onclick="go('s-posted',this)">Đã đăng<span class="n" id="n-posted"></span></a>
   <a class="nav" onclick="go('s-ctl',this)">Điều khiển</a>
@@ -322,6 +323,34 @@ async function load(){
   h += d.manual.length ? d.manual.map(manualCard).join('')
      : '<div class="empty">Chưa có mục nào — bấm "Tạo tiếp", hoặc đợi app tự nạp.</div>';
   h += '</div>';
+
+  const sd = d.stats || {rows:[], by_pillar:{}, by_image:{}};
+  if(sd.rows.length){
+    const avg = sd.rows.reduce((a,r)=>a+r.views,0)/sd.rows.length;
+    const grp = (obj, title) => {
+      const ks = Object.keys(obj);
+      if(!ks.length) return '';
+      return '<div style="margin-top:14px"><span class="tag">'+title+'</span>'
+        + ks.map(k=>'<div class="row"><span class="l">'+esc(k)
+          +' <span class="mut">('+obj[k].n+' bài)</span></span>'
+          +'<span><b>'+obj[k].views+'</b> view/bài <span class="mut">· '
+          +obj[k].likes+' like · cao nhất '+obj[k].best+'</span></span></div>').join('')
+        + '</div>';
+    };
+    h += '<div class="card" id="s-stats"><div class="chead"><div>'
+      + '<h2>Kết quả thật</h2><p class="sub">'+sd.rows.length
+      + ' bài gần nhất · trung bình '+avg.toFixed(0)+' view/bài. '
+      + 'Đây là TỔNG view, không phải impression X dùng để trả tiền — '
+      + 'con số thật luôn thấp hơn.</p></div></div>'
+      + grp(sd.by_pillar, 'theo chủ đề (chỉ tính bài đã đủ 6 giờ)')
+      + grp(sd.by_image, 'có ảnh hay không')
+      + '<div style="margin-top:14px"><span class="tag">từng bài</span>'
+      + sd.rows.slice(0,10).map(r=>'<div class="row"><span class="l">'
+        + '<span class="pill">'+esc(r.pillar)+'</span>'+esc(r.text.slice(0,58))
+        + '</span><span class="mut">'+r.views+' view · '+r.likes+' like · '
+        + r.age_h+'h</span></div>').join('')
+      + '</div></div>';
+  }
 
   h += '<div class="card" id="s-pending"><div class="chead"><div>'
     + '<h2>Chờ duyệt ('+d.pending.length+')</h2></div></div>';
@@ -496,6 +525,7 @@ def _state_payload() -> dict:
             for i in manual.pending()
         ],
         "manual_sum": manual.summary(),
+        "stats": stats.cached(),
         "refill": dict(_REFILL),
         "models": {"post": config.MODEL_POST, "reply": config.MODEL_REPLY,
                    "vi": config.MODEL_TRANSLATE},

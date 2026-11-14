@@ -76,14 +76,22 @@ class DayState:
         setattr(self, field_name, nxt.isoformat())
         return nxt
 
-    def record_post(self, window: str, url: str, text: str, kind: str = "post") -> None:
+    def record_post(self, window: str, url: str, text: str, kind: str = "post",
+                    pillar: str = "", image: str = "") -> None:
+        """Ghi lại bài đã đăng.
+
+        pillar và image được ghi từ 14/11 để sau này đo được: chủ đề nào kéo
+        view, bài có ảnh có hơn bài không. Trước đó chỉ lưu text nên không
+        ghép ngược lại được — app soạn 6 chủ đề mà không biết cái nào ăn.
+        """
         if kind == "thread":
             self.thread_done = True
         else:
             self.posts_done[window] = self.posts_done.get(window, 0) + 1
         self.posted.append({
-            "kind": kind, "window": window, "url": url,
-            "at": config.now().isoformat(), "text": text[:400],
+            "kind": kind, "window": window, "url": url, "pillar": pillar,
+            "image": bool(image), "at": config.now().isoformat(),
+            "text": text[:400],
         })
 
     def record_reply(self, author: str, tweet_id: str, url: str, text: str) -> None:
