@@ -21,6 +21,14 @@ Thumbs.db
 Desktop.ini
 .DS_Store
 
+# App runtime (trạng thái, nhật ký, ảnh chụp khi lỗi, draft dry-run)
+posts/.state/
+posts/.log/
+posts/dryrun_*.md
+posts/kol_scan_*.json
+posts/img/
+STOP
+
 # Temp
 *.tmp
 *.bak

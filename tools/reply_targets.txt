@@ -1,0 +1,40 @@
+# Danh sách handle để quét tìm bài reply. Mỗi dòng 1 handle, '#' là chú thích.
+# Số follower đo thật ngày 2026-11-14. Dải nhận: 10k - 600k (xem kol_scanner.py).
+# Sửa file này là đổi được mục tiêu, không cần sửa code.
+
+# --- crypto / markets ---
+thedefiedge          # 297,742
+RyanSAdams           # 276,301
+StaniKulechov        # 304,845
+sassal0x             # 296,450
+TrustlessState       # 262,371
+0xngmi               # 198,456
+0xfoobar             # 179,376
+DefiIgnas            # 163,883
+Darrenlautf          # 152,924
+hosseeb              # 150,370
+pet3rpan_            #  42,617
+smyyguy              #  20,958
+eigenphi             #  10,278
+
+# --- AI (nhóm mua Premium nhiều nhất -> impression của họ mới được tính tiền) ---
+_akhaliq             # 541,372
+rasbt                # 538,346
+hardmaru             # 447,873
+emollick             # 418,533
+simonw               # 254,430
+goodside             # 240,100
+swyx                 # 213,216
+giffmana             # 158,237
+AndrewCurran_        # 117,252
+
+# --- Trên 600k: luôn bị loại trừ khi bài dưới 15 phút. Bỏ chú thích nếu muốn thử ---
+# tier10k            # 1,095,373
+# Pentosh1           #   942,251
+# CryptoWizardd      #   809,834
+# CryptoKaleo        #   728,385
+# MustStopMurad      #   726,082
+# milesdeutscher     #   681,690
+# DrJimFan           #   605,071
+
+# Không tồn tại (gỡ 14/11): jam1sm1th

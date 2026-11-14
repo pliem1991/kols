@@ -1,7 +1,7 @@
 # Hướng dẫn lấy Cookies X (Twitter) cho twscrape
 
 ## QUAN TRỌNG
-- Dùng account PHỤ / burner, KHÔNG dùng @L_gaucuhanh
+- Dùng account PHỤ / burner, KHÔNG dùng @macropandaX
 - twscrape chỉ READ (đọc), không post/reply — không ảnh hưởng account chính
 
 ## Bước 1: Đăng nhập X bằng account phụ

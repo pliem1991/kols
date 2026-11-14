@@ -1,0 +1,190 @@
+"""Cấu hình app XKols — đọc env, hằng số lịch, đường dẫn."""
+from __future__ import annotations
+
+import os
+import random
+from dataclasses import dataclass, field
+from datetime import datetime, time as dtime, timedelta, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+TOOLS = ROOT / "tools"
+POSTS = ROOT / "posts"
+# reports/ (TradingAgents) không còn được dùng từ 14/11 — số liệu lấy trực tiếp
+# trong app/market.py. Thư mục cũ giữ lại làm tư liệu, app không đọc nữa.
+WORKFLOWS = ROOT / "workflows"
+STATE_DIR = POSTS / ".state"
+LOG_DIR = POSTS / ".log"
+STOP_FILE = ROOT / "STOP"          # tạo file này là app dừng ở vòng kế tiếp
+
+# ICT = UTC+7 quanh năm, không có DST -> offset cố định, không cần tzdata.
+# ICT = US Eastern + 12h.
+TZ = timezone(timedelta(hours=7), "ICT")
+
+# --- model ------------------------------------------------------------------
+MODEL_POST = "claude-opus-5-5"     # bài gốc + thread: chất lượng quan trọng nhất
+# Reply đổi sang Opus ngày 14/11. Lý do cũ (reply nhiều nên chọn model rẻ) không
+# còn đúng: reply tự động giờ chỉ phục vụ người đã tương tác với mình (0 lượt
+# trong 30 ngày), còn hàng đợi làm tay tối đa 8 draft/ngày — nhỏ hơn hàng chục
+# lần so với mức 25/ngày lúc thiết kế. Thêm nữa Sonnet trả sai định dạng 3 lần
+# liên tiếp tối 14/11 (viết thẳng reply thay vì bọc JSON) nên draft bị bỏ phí.
+MODEL_REPLY = "claude-opus-5-5"
+# Dịch tiếng Việt thì Sonnet thừa sức, và mỗi mẻ chỉ gọi một lần.
+MODEL_TRANSLATE = "claude-sonnet-5-5"
+
+# --- lịch (giờ ICT, theo workflows/post_scheduler.md) -----------------------
+@dataclass(frozen=True)
+class Window:
+    name: str
+    start: dtime
+    end: dtime
+    posts: int                     # số bài gốc trong cửa sổ
+    thread: bool = False
+
+    def contains(self, t: dtime) -> bool:
+        return self.start <= t <= self.end
+
+
+WINDOWS: tuple[Window, ...] = (
+    Window("morning", dtime(7, 30), dtime(9, 30), posts=1, thread=True),
+    Window("evening", dtime(20, 0), dtime(23, 30), posts=3),
+)
+
+POST_GAP_MIN = (45, 90)            # phút, giãn cách giữa 2 bài gốc
+REPLY_GAP_MIN = (4, 12)            # phút, giãn cách giữa 2 reply
+# Tuổi tối đa của bài để còn đáng reply. 60 phút là luật trong
+# workflows/reply_scheduler.md — bài cũ hơn đã có hàng trăm reply, vào là chìm.
+# Ngoài hai cửa sổ đăng thì thường không có target nào, đó là đúng chứ không lỗi.
+# Chỉnh tạm bằng biến môi trường XKOLS_REPLY_WINDOW để xem thử.
+REPLY_FRESH_MIN = int(os.environ.get("XKOLS_REPLY_WINDOW", "60"))
+
+# Từ 14/11 reply chỉ dành cho người đã tương tác với mình, nên cửa sổ rộng hẳn:
+# ai hỏi mình thì trả lời muộn vẫn hơn bỏ qua, và không còn chuyện phải chen vào
+# sớm kẻo chìm. 1440 phút = 24 giờ.
+MENTION_WINDOW_MIN = int(os.environ.get("XKOLS_MENTION_WINDOW", "1440"))
+
+# Hàng đợi LÀM TAY dùng cửa sổ riêng, rộng hơn 60 phút. Luật 60 phút sinh ra cho
+# reply tự động (vào sớm kẻo chìm); bạn tự chọn tay thì thà có vài bài để cân
+# nhắc còn hơn hàng đợi trống. Đo 14/11 lúc 21:35 ICT: 60 phút ra 0 ứng viên,
+# 240 phút ra 1.
+MANUAL_WINDOW_MIN = int(os.environ.get("XKOLS_MANUAL_WINDOW", "180"))
+
+MAX_REPLIES_PER_DAY = 25
+MAX_REPLIES_PER_AUTHOR_PER_DAY = 2
+
+# Tự RT bài cũ của chính mình: 1 lần/ngày, chỉ bài đã đủ cũ để vòng người xem
+# khác hẳn lần đăng đầu.
+# Quote tweet: bài của người khác + bình luận của mình. Tính là bài gốc của
+# mình nên ĐƯỢC tính impression payout, khác hẳn reply.
+QUOTES_PER_DAY = 2
+
+# Ảnh: ưu tiên có, nhưng chỉ khi ảnh MANG thông tin (biểu đồ từ số của pipeline).
+# Đính cùng một ảnh vào mọi bài thì thành nhiễu, nên giới hạn mỗi ngày.
+MAX_IMAGE_POSTS_PER_DAY = 2
+
+# Luân phiên chủ đề cho BÀI GỐC, mỗi bài đúng một chủ đề, dùng hết mới quay vòng.
+#
+# Sửa 14/11 lần hai: bộ cũ (how_it_works, self_deprecating...) viết về CHÍNH CÁI
+# HỆ THỐNG — "agent của tôi cãi nhau", "pipeline của tôi tính sai". Đó là nội dung
+# meta, không ai theo dõi một account thị trường để đọc chuyện công cụ của nó.
+# Ba account tham khảo đều viết về thị trường và tin tức. Bộ mới bám theo đó.
+# track_record cố ý KHÔNG nằm đây: thread buổi sáng đã lo phần đó.
+POST_PILLARS = ("news", "trend", "market_read", "explainer", "take", "wry")
+
+REPOST_PER_DAY = 1
+REPOST_MIN_AGE_DAYS = 3
+REPOST_MAX_AGE_DAYS = 21
+IDLE_SLEEP_SEC = (240, 420)        # ngoài cửa sổ thì ngủ dài, có nhiễu
+
+MAX_POST_CHARS = 280               # giữ 280 cho tới khi có Premium (post dài)
+MAX_HASHTAGS = 2
+
+
+def rand_gap_sec(bounds: tuple[int, int]) -> int:
+    lo, hi = bounds
+    return random.randint(lo * 60, hi * 60)
+
+
+def now() -> datetime:
+    return datetime.now(TZ)
+
+
+def current_window(t: datetime | None = None) -> Window | None:
+    t = t or now()
+    for w in WINDOWS:
+        if w.contains(t.timetz().replace(tzinfo=None)):
+            return w
+    return None
+
+
+# --- env --------------------------------------------------------------------
+def _read_env_file(path: Path) -> dict[str, str]:
+    cfg: dict[str, str] = {}
+    if not path.exists():
+        return cfg
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        cfg[k.strip()] = v.strip()
+    return cfg
+
+
+class ConfigError(RuntimeError):
+    pass
+
+
+@dataclass
+class Settings:
+    anthropic_key: str
+    x_username: str
+    x_ct0: str
+    x_auth_token: str
+    dry_run: bool = True
+    headful: bool = False
+    account_handle: str = field(default="")
+
+    @property
+    def cookies(self) -> list[dict]:
+        base = {"domain": ".x.com", "path": "/", "secure": True}
+        return [
+            {"name": "ct0", "value": self.x_ct0, **base},
+            {"name": "auth_token", "value": self.x_auth_token, "httpOnly": True, **base},
+        ]
+
+
+def load_settings(dry_run: bool = True, headful: bool = False) -> Settings:
+    claude = _read_env_file(TOOLS / "claude.env")
+    main_acc = _read_env_file(TOOLS / "x_main.env")
+
+    # Biến môi trường thắng file, để test được mà không phải sửa file thật.
+    def pick(name: str, src: dict[str, str]) -> str:
+        return os.environ.get(name) or src.get(name, "")
+
+    key = pick("ANTHROPIC_API_KEY", claude)
+    ct0 = pick("X_CT0", main_acc)
+    auth = pick("X_AUTH_TOKEN", main_acc)
+
+    missing = []
+    if not key:
+        missing.append(f"ANTHROPIC_API_KEY trong {TOOLS / 'claude.env'}")
+    # Dry-run không mở browser nên không cần cookie — chỉ --live mới bắt buộc.
+    if not dry_run:
+        if not ct0:
+            missing.append(f"X_CT0 trong {TOOLS / 'x_main.env'}")
+        if not auth:
+            missing.append(f"X_AUTH_TOKEN trong {TOOLS / 'x_main.env'}")
+    if missing:
+        raise ConfigError("Thiếu cấu hình:\n  - " + "\n  - ".join(missing))
+
+    handle = pick("X_USERNAME", main_acc).lstrip("@")
+    return Settings(
+        anthropic_key=key,
+        x_username=handle,
+        x_ct0=ct0,
+        x_auth_token=auth,
+        dry_run=dry_run,
+        headful=headful,
+        account_handle=handle,
+    )
