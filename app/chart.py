@@ -161,11 +161,16 @@ def render(snap: market.Snapshot, out_path: Path) -> Path:
     return out_path
 
 
-def latest_card(out_path: Path | None = None) -> Path | None:
-    """Vẽ ảnh từ dữ liệu thị trường mới nhất. None nếu không lấy được dữ liệu."""
-    snap = market.primary()
-    if snap is None or not snap.closes:
+def latest_card(out_path: Path | None = None, symbol: str = "") -> Path | None:
+    """Vẽ ảnh từ dữ liệu thị trường mới nhất. None nếu không lấy được dữ liệu.
+
+    `symbol` là mã mà BÀI đang nói tới — thêm 15/11. Trước đó luôn lấy mã đầu
+    danh sách (BTC), nên bài viết về ETH vẫn kèm chart BTC.
+    """
+    snaps = [s for s in market.get() if s.closes]
+    if not snaps:
         return None
+    snap = next((s for s in snaps if s.symbol == symbol), snaps[0])
     out = out_path or (config.POSTS / "img"
                        / f"{snap.symbol}_{snap.as_of[:10]}.png")
     return render(snap, out)
@@ -307,6 +312,12 @@ def trend_card(trends: list[dict], out_path: Path | None = None) -> Path | None:
     """
     rows = [t for t in (trends or []) if t.get("accounts", 0) >= 2][:8]
     if len(rows) < 3:
+        return None
+    # Biểu đồ cột mà mọi cột bằng nhau thì không nói gì cả. Gặp 15/11: tám chủ
+    # đề, cột nào cũng đúng 2 tài khoản — người xem không rút ra được thứ tự
+    # nào. Cần ít nhất một chủ đề nhô hẳn lên, và phải có chênh lệch.
+    vals = [t["accounts"] for t in rows]
+    if max(vals) < 3 or max(vals) == min(vals):
         return None
     out = out_path or (config.POSTS / "img"
                        / f"trend_{config.now():%Y%m%d}.png")

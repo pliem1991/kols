@@ -1,6 +1,16 @@
 # Danh sách handle để quét tìm bài reply. Mỗi dòng 1 handle, '#' là chú thích.
-# Số follower đo thật ngày 2026-11-14. Dải nhận: 10k - 600k (xem kol_scanner.py).
-# Sửa file này là đổi được mục tiêu, không cần sửa code.
+# Số follower đo thật: nhóm cũ 2026-11-14, nhóm thêm 2026-11-15.
+# Dải nhận: 10k - 600k (xem kol_scanner.py). Sửa file này là đổi được mục tiêu,
+# không cần sửa code.
+#
+# Dấu '!' đầu dòng = GHIM: bỏ qua dải follower cho riêng handle đó. Dùng khi
+# chủ dự án chỉ đích danh một người — lựa chọn của người đè lên phỏng đoán của
+# dải. Cổng "bài đã quá đông reply" vẫn áp dụng cho handle ghim.
+#
+# 15/11 mở rộng 22 -> 44 handle. Lý do: nhánh reply tự động hết target liên tục
+# (đo 15/11: danh sách following 58 acc, 6 giờ ra đúng 1 ứng viên), mà nới cửa
+# sổ thời gian 60 -> 360 phút không thêm được bài nào — nghẽn ở nguồn, không ở
+# thời gian. Mọi handle dưới đây đã kiểm tra tồn tại và đo follower thật.
 
 # --- crypto / markets ---
 thedefiedge          # 297,742
@@ -17,6 +27,23 @@ pet3rpan_            #  42,617
 smyyguy              #  20,958
 eigenphi             #  10,278
 
+# --- crypto / markets, thêm 15/11 ---
+punk6529             # 486,853
+Rewkang              # 422,188
+DefiLlama            # 371,037
+adamscochran         # 307,455
+Route2FI             # 295,244
+CL207                # 279,582
+ChainLinkGod         # 187,616
+DeFi_Dad             # 182,114
+santiagoroel         # 134,052
+stacy_muur           #  78,167
+
+# --- chủ dự án chỉ định 15/11 (đang follow sẵn) ---
+DaanCrypto           # 414,557
+RookieXBT            # 498,209
+!DonAlt              # 796,905 — trên dải, ghim nên vẫn quét
+
 # --- AI (nhóm mua Premium nhiều nhất -> impression của họ mới được tính tiền) ---
 _akhaliq             # 541,372
 rasbt                # 538,346
@@ -28,13 +55,35 @@ swyx                 # 213,216
 giffmana             # 158,237
 AndrewCurran_        # 117,252
 
+# --- AI, thêm 15/11 ---
+amasad               # 506,568
+jeremyphoward        # 333,201
+omarsar0             # 329,262
+Yuchenj_UW           # 308,812
+nearcyan             # 272,967
+mckaywrigley         # 230,079
+bentossell           # 203,507
+arankomatsuzaki      # 200,653
+alexalbert__         # 159,941
+abacaj               #  48,604
+corbtt               #  19,790
+
 # --- Trên 600k: luôn bị loại trừ khi bài dưới 15 phút. Bỏ chú thích nếu muốn thử ---
+# blknoiz06          # 1,444,808
 # tier10k            # 1,095,373
+# ErikVoorhees       #   996,812
 # Pentosh1           #   942,251
+# CryptoCred         #   833,576
 # CryptoWizardd      #   809,834
+# fchollet           #   756,097
+# ClementDelangue    #   732,891
 # CryptoKaleo        #   728,385
 # MustStopMurad      #   726,082
 # milesdeutscher     #   681,690
 # DrJimFan           #   605,071
 
-# Không tồn tại (gỡ 14/11): jam1sm1th
+# Không tồn tại (đã kiểm tra, đừng thêm lại):
+#   jam1sm1th (gỡ 14/11)
+#   iamDCinvestor, CryptoDonAlt, Teknium1 (kiểm tra 15/11)
+#   -> handle thật của DonAlt là @DonAlt, đã thêm ở trên
+# Dưới band, bỏ qua: dynamo_patrick (225), thiccythot_ (85)

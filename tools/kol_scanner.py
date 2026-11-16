@@ -34,6 +34,7 @@ from twscrape import API
 HERE = Path(__file__).parent
 DB_PATH = HERE / "twscrape_accounts.db"
 TARGETS_FILE = HERE / "reply_targets.txt"
+TARGETS_AUTO_FILE = HERE / "reply_targets_auto.txt"
 OUT_DIR = HERE.parent / "posts"
 
 # --- gates from the workflow -------------------------------------------------
@@ -67,16 +68,38 @@ SEED_POOL = [
 ]
 
 
+# Handle ghim: chủ dự án tự chọn, bỏ qua dải follower. Đánh dấu bằng '!' ở đầu
+# dòng trong reply_targets.txt. Dải 10k-600k là phỏng đoán "reply ở đây mới có
+# người đọc"; khi chủ dự án chỉ đích danh một người thì lựa chọn đó đè lên phỏng
+# đoán. Cổng ĐÔNG (MAX_REPLIES) vẫn giữ — bài đã 80 reply thì ai đăng cũng chìm.
+PINNED: set[str] = set()
+
+
+def _read_handles(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    out = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.split("#", 1)[0].strip()
+        pin = line.startswith("!")
+        line = line.lstrip("!").strip().lstrip("@")
+        if line:
+            out.append(line)
+            if pin:
+                PINNED.add(line.lower())
+    return out
+
+
 def load_targets() -> list[str]:
-    if TARGETS_FILE.exists():
-        handles = []
-        for line in TARGETS_FILE.read_text(encoding="utf-8").splitlines():
-            line = line.split("#", 1)[0].strip().lstrip("@")
-            if line:
-                handles.append(line)
-        if handles:
-            return handles
-    return SEED_POOL
+    """Danh sách viết tay + danh sách app tự thêm (app/targets.py), bỏ trùng."""
+    PINNED.clear()
+    handles = _read_handles(TARGETS_FILE) + _read_handles(TARGETS_AUTO_FILE)
+    seen, out = set(), []
+    for h in handles:
+        if h.lower() not in seen:
+            seen.add(h.lower())
+            out.append(h)
+    return out or SEED_POOL
 
 
 def out(msg: str = "") -> None:
@@ -93,7 +116,7 @@ def body_text(text: str) -> str:
 
 
 def judge(age_min: float, replies: int, followers: int, window_min: int,
-          text: str = "x" * MIN_BODY_CHARS):
+          text: str = "x" * MIN_BODY_CHARS, pinned: bool = False):
     """Return (ok, reason). Reason explains a rejection, or names the tier."""
     if age_min > window_min:
         return False, f"too old ({age_min:.0f}m)"
@@ -101,6 +124,12 @@ def judge(age_min: float, replies: int, followers: int, window_min: int,
     body = body_text(text)
     if len(body) < MIN_BODY_CHARS:
         return False, f"only {len(body)} chars of body text (link-only?)"
+
+    if pinned:
+        # Bỏ qua dải follower, giữ cổng đông.
+        if replies > MAX_REPLIES:
+            return False, f"{replies} replies already, buried"
+        return True, "ghim"
 
     if followers >= MEGA_FOLLOWERS:
         if age_min > MEGA_MAX_AGE_MIN:
@@ -156,7 +185,11 @@ async def scan_pool(api: API, handles: list[str], window_min: int) -> dict:
 
     candidates: list[dict] = []
     rejected: list[dict] = []
-    seen: dict[str, dict] = {h.lower(): {"handle": h, "seen": 0, "kept": 0}
+    # "en"/"other" đếm ngôn ngữ từng handle: app/scan.py dùng nó để gạch hẳn
+    # những tài khoản không bao giờ đăng tiếng Anh ra khỏi danh sách following,
+    # thay vì quét lại mỗi vòng rồi mới loại từng bài (thêm 2026-11-15).
+    seen: dict[str, dict] = {h.lower(): {"handle": h, "seen": 0, "kept": 0,
+                                         "en": 0, "other": 0}
                              for h in handles}
     errors: list[str] = []
 
@@ -172,11 +205,13 @@ async def scan_pool(api: API, handles: list[str], window_min: int) -> dict:
                     continue
 
                 seen[author]["seen"] += 1
+                lang = getattr(tw, "lang", "") or ""
+                seen[author]["en" if lang in ("en", "") else "other"] += 1
                 age_min = (now - tw.date).total_seconds() / 60
                 followers = tw.user.followersCount
                 raw_text = (tw.rawContent or "").strip()
                 ok, reason = judge(age_min, tw.replyCount, followers, window_min,
-                                   raw_text)
+                                   raw_text, pinned=author in PINNED)
                 row = {
                     "handle": tw.user.username,
                     "followers": followers,
@@ -189,6 +224,7 @@ async def scan_pool(api: API, handles: list[str], window_min: int) -> dict:
                     "replies": tw.replyCount,
                     "views": tw.viewCount or 0,
                     "date": tw.date.isoformat(),
+                    "lang": getattr(tw, "lang", "") or "",
                     "tier": reason if ok else None,
                 }
                 if ok:

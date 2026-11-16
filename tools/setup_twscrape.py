@@ -38,11 +38,28 @@ async def test_account():
         print(f"Test failed: {e}")
         return False
 
+
+async def list_accounts():
+    """Xem đang có mấy acc phụ. Mỗi acc thêm vào là một suất hạn mức nữa —
+    twscrape tự xoay sang acc còn rảnh khi acc đang dùng chạm limit."""
+    import sqlite3
+    con = sqlite3.connect(str(DB_PATH))
+    rows = list(con.execute(
+        "select username, active, last_used from accounts order by username"))
+    if not rows:
+        print("Chua co acc nao.")
+        return
+    print(f"{len(rows)} acc:")
+    for name, active, last in rows:
+        print(f"  @{name:<20} {'dang dung' if active else 'TAT'}"
+              f"   lan cuoi: {last or '-'}")
+
 async def main():
     if len(sys.argv) < 2:
         print("Usage:")
         print("  python setup_twscrape.py add <username> <ct0> <auth_token>")
         print("  python setup_twscrape.py test")
+        print("  python setup_twscrape.py list")
         return
 
     cmd = sys.argv[1]
@@ -51,6 +68,8 @@ async def main():
         print("\nNow test with: python setup_twscrape.py test")
     elif cmd == "test":
         await test_account()
+    elif cmd == "list":
+        await list_accounts()
     else:
         print("Invalid args. Use: add <username> <ct0> <auth_token>")
 

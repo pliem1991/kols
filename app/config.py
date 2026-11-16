@@ -45,8 +45,21 @@ class Window:
         return self.start <= t <= self.end
 
 
+# Bốn cửa sổ, xếp theo giờ tăng dần (next_window() dựa vào thứ tự này).
+#
+# Hai cửa sổ cũ (morning, evening) chọn theo giả định "ICT = ET + 12, ngoài hai
+# khung đó là đêm ở Mỹ". Đo thật ngày 15/11 — 282 bài trong 7 ngày của 22 KOL
+# đang theo dõi, chia theo giờ ICT — cho thấy giả định đó sai ở hai chỗ:
+#   · 11-18h ICT median 22.300 view, không hề chết (đó là sáng ở châu Âu);
+#   · 20-23h ICT median 15.300 view, THẤP NHẤT trong bốn khung, mà lại đang
+#     gánh 3 trong 4 bài mỗi ngày.
+#   · 00-06h ICT là chỗ KOL tập trung nhất (148/282 bài) — giờ Mỹ hoạt động
+#     thật, 13:00-19:00 ET.
+# Chủ dự án chốt 15/11: không dời khung cũ, thêm khung mới và tăng số bài.
 WINDOWS: tuple[Window, ...] = (
+    Window("night", dtime(0, 0), dtime(2, 30), posts=2),
     Window("morning", dtime(7, 30), dtime(9, 30), posts=1, thread=True),
+    Window("midday", dtime(11, 0), dtime(13, 0), posts=1),
     Window("evening", dtime(20, 0), dtime(23, 30), posts=3),
 )
 
@@ -67,10 +80,18 @@ MENTION_WINDOW_MIN = int(os.environ.get("XKOLS_MENTION_WINDOW", "1440"))
 # reply tự động (vào sớm kẻo chìm); bạn tự chọn tay thì thà có vài bài để cân
 # nhắc còn hơn hàng đợi trống. Đo 14/11 lúc 21:35 ICT: 60 phút ra 0 ứng viên,
 # 240 phút ra 1.
-MANUAL_WINDOW_MIN = int(os.environ.get("XKOLS_MANUAL_WINDOW", "180"))
+# Nới 180 -> 360 ngày 15/11: đo lúc 08:3x, cửa sổ 180 phút ra đúng 3 ứng viên và
+# cả 3 đều đã bị nhánh reply TỰ ĐỘNG lấy mất trước đó -> hàng đợi làm tay rỗng.
+MANUAL_WINDOW_MIN = int(os.environ.get("XKOLS_MANUAL_WINDOW", "360"))
 
-MAX_REPLIES_PER_DAY = 25
+MAX_REPLIES_PER_DAY = 35
 MAX_REPLIES_PER_AUTHOR_PER_DAY = 2
+
+# Ngoài cửa sổ đăng thì VẪN quét reply, chỉ thưa hơn (15-30 phút/lần thay vì
+# 4-12). Thêm 15/11: trước đó cả vòng lặp nghỉ ngoài cửa sổ, nên từ 13:00 tới
+# 20:00 ICT ai mention mình cũng phải đợi. Thưa là vì acc phụ twscrape có hạn
+# mức request — đã dính một lần lúc 09:04 ngày 15/11.
+REPLY_GAP_OFF_WINDOW_MIN = (15, 30)
 
 # Tự RT bài cũ của chính mình: 1 lần/ngày, chỉ bài đã đủ cũ để vòng người xem
 # khác hẳn lần đăng đầu.
@@ -80,7 +101,9 @@ QUOTES_PER_DAY = 2
 
 # Ảnh: ưu tiên có, nhưng chỉ khi ảnh MANG thông tin (biểu đồ từ số của pipeline).
 # Đính cùng một ảnh vào mọi bài thì thành nhiễu, nên giới hạn mỗi ngày.
-MAX_IMAGE_POSTS_PER_DAY = 2
+# 15/11: 2 -> 4 theo số bài mỗi ngày (4 -> 7 + thread). Vẫn ít hơn số bài, nên
+# ảnh vẫn phải "đáng vẽ" mới được chọn.
+MAX_IMAGE_POSTS_PER_DAY = 4
 
 # Luân phiên chủ đề cho BÀI GỐC, mỗi bài đúng một chủ đề, dùng hết mới quay vòng.
 #
@@ -115,6 +138,21 @@ def current_window(t: datetime | None = None) -> Window | None:
         if w.contains(t.timetz().replace(tzinfo=None)):
             return w
     return None
+
+
+def next_window(t: datetime | None = None) -> tuple[Window, str]:
+    """Cửa sổ mở kế tiếp và giờ mở, dạng "HH:MM" (hôm nay hoặc mai).
+
+    Trang theo dõi cần cái này: ngoài cửa sổ thì "bài kế 10:22" là giờ đã hẹn
+    rồi bị cổng cửa sổ chặn lại — hiện lên thành giờ quá khứ, nhìn như app
+    chết (chủ dự án hỏi 10:27 ngày 15/11).
+    """
+    t = t or now()
+    hm = t.timetz().replace(tzinfo=None)
+    for w in WINDOWS:
+        if hm < w.start:
+            return w, f"{w.start:%H:%M}"
+    return WINDOWS[0], f"{WINDOWS[0].start:%H:%M}"
 
 
 # --- env --------------------------------------------------------------------

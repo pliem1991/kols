@@ -14,11 +14,16 @@ from pathlib import Path
 from anthropic import AuthenticationError
 
 from . import (brain, chart, config, manual, payout, review, scan, state,
-               stats, web, xnews)
+               stats, targets, web, xnews)
 from .config import ConfigError, load_settings
-from .x_browser import LoginExpired, XBrowser, XError
+from .x_browser import LoginExpired, SoftLocked, XAborted, XBrowser, XError
 
 MAX_CONSECUTIVE_FAILS = 2
+# Sau ngần này lỗi liên tiếp thì nghỉ, chứ không thoát. Nghỉ lâu dần: 20, 40,
+# 60... phút. Hết số lượt mới chịu dừng — lúc đó đã nghỉ tổng cộng vài tiếng,
+# đủ để kết luận là hỏng thật chứ không phải mạng chập chờn.
+ERROR_REST_MIN = 20
+MAX_RESTS = 6
 REPLY_AGE_GRACE_MIN = 90   # bài có thể già thêm chút trong lúc soạn
 
 
@@ -54,6 +59,16 @@ def pick_image(st: state.DayState, text: str, pillar: str = "",
                   or ("correlat" in low and " ai" in low))
     try:
         if pillar == "trend" and trends:
+            # Bài trụ "trend" không có nghĩa là bài nói về ĐÚNG những chủ đề
+            # trong biểu đồ. Bài 11:31 ngày 15/11 nói về Fear & Greed, còn ảnh
+            # vẽ Anthropic / Polymarket / $ZEC — ảnh và chữ nói hai chuyện khác
+            # nhau. Chỉ gắn khi bài có nhắc ít nhất một chủ đề được vẽ.
+            shown = [t["term"] for t in trends
+                     if t.get("accounts", 0) >= 2][:8]
+            if not any(t.lower() in low for t in shown):
+                log("  bài không nhắc chủ đề nào trong biểu đồ trend "
+                    "-> đăng không ảnh")
+                return None
             p = chart.trend_card(trends)
         elif pillar == "explainer" and settings is not None:
             spec = brain.mechanism_steps(settings, text)
@@ -64,12 +79,17 @@ def pick_image(st: state.DayState, text: str, pillar: str = "",
         elif wants_corr:
             p = chart.corr_card()
         elif brain.touches_market(text):
-            p = chart.latest_card()
+            # Vẽ đúng mã mà bài đang nói tới.
+            sym = "ETH-USD" if ("eth" in low or "ethereum" in low) else "BTC-USD"
+            p = chart.latest_card(symbol=sym)
         else:
             p = None
     except Exception as e:
         log(f"  vẽ ảnh lỗi, đăng không ảnh: {type(e).__name__}: {e}")
         return None
+    # Không bao giờ đăng lại một ảnh đã dùng trong ngày (chủ dự án chốt 15/11),
+    # kể cả chart giá vẫn còn đúng số liệu. Hệ quả: bài thứ hai cùng ngày về
+    # cùng một mã sẽ đăng không ảnh — chấp nhận, hơn là lặp hình.
     if p is None or str(p) in st.images_used:
         return None
     return str(p)
@@ -283,8 +303,16 @@ async def do_quote(s, st: state.DayState) -> bool:
             log(f"  [dry] quote @{cand['handle']} ({len(text)} ký tự)")
             return True
 
-        async with XBrowser(s) as b:
-            url = await b.quote(cand["url"], text)
+        try:
+            async with XBrowser(s) as b:
+                url = await b.quote(cand["url"], text)
+        except XAborted as e:
+            # Chưa đăng gì. Đừng thử lại ngay vòng sau: mở browser mỗi 2 phút
+            # chỉ để huỷ tiếp là vừa tốn vừa dễ bị X để ý. Giãn ra rồi đi làm
+            # việc khác (bài gốc, reply) — chúng không liên quan gì tới quote.
+            log(f"  {e}")
+            st.arm("next_quote_at", (60, 90))
+            return False
         st.record_quote(cand["handle"], cand["id"], url or "?", text)
         state.append_log("quote", {"url": url or "?", "target": cand["url"],
                                    "author": cand["handle"], "chars": len(text),
@@ -356,15 +384,31 @@ async def do_reply(s, st: state.DayState) -> bool:
         # mất, chấp nhận rủi ro và reply cả bài của danh sách KOL. Biết rõ đây
         # là thứ Automation rules của X không cho phép (người nhận chưa opt-in,
         # xem phần đầu workflows/reply_scheduler.md) — đã nêu, đã được xác nhận.
-        log(f"  chưa ai tương tác ({len(cands)} lượt) -> quét danh sách KOL "
-            f"(dưới {config.REPLY_FRESH_MIN} phút)")
+        log(f"  chưa ai tương tác ({len(cands)} lượt) -> quét người mình follow "
+            f"và danh sách KOL (dưới {config.REPLY_FRESH_MIN} phút)")
+
+        def usable(rows):
+            return [c for c in rows if not st.already_touched(c["id"])
+                    and st.can_reply_to(c["handle"])]
+
+        # Người mình follow trước: mình đã tự chọn họ, nên sát hơn danh sách
+        # cố định trong reply_targets.txt.
         try:
-            rows = await scan.find_candidates(window_min=config.REPLY_FRESH_MIN,
-                                              top_n=15)
-            fresh = [c for c in rows if not st.already_touched(c["id"])
-                     and st.can_reply_to(c["handle"])]
+            rows = await scan.find_from_following(s.account_handle,
+                                                  config.REPLY_FRESH_MIN)
+            fresh = usable(rows)
+            if fresh:
+                log(f"  {len(fresh)} bài từ người mình follow")
         except Exception as e:
-            log(f"  quét KOL lỗi: {type(e).__name__}: {e}")
+            log(f"  quét following lỗi: {type(e).__name__}: {e}")
+
+        if not fresh:
+            try:
+                rows = await scan.find_candidates(
+                    window_min=config.REPLY_FRESH_MIN, top_n=15)
+                fresh = usable(rows)
+            except Exception as e:
+                log(f"  quét KOL lỗi: {type(e).__name__}: {e}")
 
     if not fresh:
         log("  không có target nào.")
@@ -407,12 +451,42 @@ async def do_reply(s, st: state.DayState) -> bool:
 
 
 # --- vòng lặp ----------------------------------------------------------------
+async def _refill_manual(s) -> None:
+    """Reply tự động không còn target thì nạp hàng đợi LÀM TAY.
+
+    Chỉ đọc (acc phụ twscrape) và soạn draft — không chạm vào x.com bằng acc
+    chính. Có mốc giãn cách riêng trong manual.auto_refill_due().
+    """
+    if len(manual.pending()) >= manual.REFILL_AT or not manual.auto_refill_due():
+        return
+    manual.mark_auto_refill()
+    try:
+        r = await manual.refill(s)
+        if r["added"]:
+            log(f"  soạn thêm {r['added']} mục cho bạn gửi tay (xem trên trang)")
+        elif r["skipped"]:
+            log(f"  việc làm tay: {r['cands']} bài nhưng bỏ hết ({r['skipped'][0]})")
+    except Exception as e:
+        log(f"  soạn việc làm tay lỗi: {type(e).__name__}: {e}")
+
+
 async def tick(s, st: state.DayState) -> str:
     """Một nhịp. Trả tên hành động đã làm, hoặc lý do nghỉ."""
     w = config.current_window()
     if w is None:
-        nxt = ", ".join(f"{x.name} {x.start:%H:%M}" for x in config.WINDOWS)
-        return f"ngoài cửa sổ (cửa sổ: {nxt})"
+        # Ngoài cửa sổ thì KHÔNG đăng bài, nhưng vẫn trả lời. Sửa 15/11: trước
+        # đó cả vòng lặp nghỉ, nên từ 13:00 tới 20:00 ICT ai mention mình cũng
+        # phải đợi tới tối. Nhịp thưa hơn trong cửa sổ để đỡ hạn mức acc phụ.
+        nw, at = config.next_window()
+        if st.replies_done < config.MAX_REPLIES_PER_DAY and st.due("next_reply_at"):
+            done = await do_reply(s, st)
+            st.arm("next_reply_at", config.REPLY_GAP_OFF_WINDOW_MIN)
+            if done:
+                return "reply (ngoài cửa sổ)"
+            await _refill_manual(s)
+            return f"ngoài cửa sổ, không có target (cửa sổ kế {nw.name} {at})"
+        return (f"ngoài cửa sổ — cửa sổ kế {nw.name} {at}, "
+                f"reply kế {st.when('next_reply_at')}")
 
     if w.thread and not st.thread_done:
         if await do_thread(s, st):
@@ -429,7 +503,7 @@ async def tick(s, st: state.DayState) -> str:
 
     # Quote tweet: sau khi đủ bài gốc của cửa sổ, dùng chung nhịp giãn với bài gốc.
     if (st.posts_in(w.name) >= w.posts and st.quotes_done < config.QUOTES_PER_DAY
-            and st.due("next_post_at")):
+            and st.due("next_post_at") and st.due("next_quote_at")):
         if await do_quote(s, st):
             st.arm("next_post_at", config.POST_GAP_MIN)
             return "quote"
@@ -447,19 +521,7 @@ async def tick(s, st: state.DayState) -> str:
             st.arm("next_reply_at", config.REPLY_GAP_MIN)
             return "reply"
         st.arm("next_reply_at", (6, 15))
-        # Reply tự động không còn target thì nạp hàng đợi LÀM TAY. Chỗ này chỉ
-        # đọc và soạn, không chạm vào x.com bằng acc chính.
-        if len(manual.pending()) < manual.REFILL_AT and manual.auto_refill_due():
-            manual.mark_auto_refill()
-            try:
-                r = await manual.refill(s)
-                if r["added"]:
-                    log(f"  soạn thêm {r['added']} mục cho bạn gửi tay (xem trên trang)")
-                elif r["skipped"]:
-                    log(f"  việc làm tay: {r['cands']} bài nhưng bỏ hết "
-                        f"({r['skipped'][0]})")
-            except Exception as e:
-                log(f"  soạn việc làm tay lỗi: {type(e).__name__}: {e}")
+        await _refill_manual(s)
         return "không có target"
 
     return (f"chờ — bài kế {st.when('next_post_at')}, "
@@ -468,6 +530,7 @@ async def tick(s, st: state.DayState) -> str:
 
 async def loop(s, once: bool = False) -> None:
     fails = 0
+    rests = 0
     log(f"khởi động — {'DRY RUN, không đăng gì' if s.dry_run else 'ĐĂNG THẬT'} "
         f"| acc @{s.account_handle} | bài+reply={config.MODEL_REPLY} "
         f"dịch={config.MODEL_TRANSLATE}")
@@ -479,6 +542,17 @@ async def loop(s, once: bool = False) -> None:
     if config.STOP_FILE.exists():
         config.STOP_FILE.unlink(missing_ok=True)
         log("  (đã xoá cờ STOP còn sót của lần chạy trước)")
+
+    # Gỡ những handle app tự thêm mà lâu rồi không ra ứng viên nào. Danh sách
+    # viết tay không bị đụng tới.
+    try:
+        gone = targets.prune()
+        ts = targets.summary()
+        log(f"đối tượng reply: {ts['total']} handle "
+            f"({ts['auto']} do app tự thêm, trần {ts['cap_auto']})"
+            + (f" — gỡ {len(gone)}: " + ", ".join(gone) if gone else ""))
+    except Exception as e:
+        log(f"không dọn được danh sách đối tượng: {type(e).__name__}: {e}")
 
     # Nạp sẵn tin X + chỉ số account để trang web có cái hiển thị ngay từ đầu,
     # không phải đợi tới lượt đăng đầu tiên. Lỗi ở đây không được chặn app.
@@ -548,6 +622,23 @@ async def loop(s, once: bool = False) -> None:
             log("DỪNG: API key Claude không hợp lệ. Kiểm tra ANTHROPIC_API_KEY "
                 f"trong {config.TOOLS / 'claude.env'}")
             return
+        except XAborted as e:
+            # Huỷ sạch, chưa đăng gì -> KHÔNG đếm vào chuỗi lỗi chết. Chỉ bỏ
+            # việc này và đi tiếp; nếu không thì một việc phụ hỏng (quote) kéo
+            # theo cả bài gốc lẫn reply ngừng theo (đêm 16/11).
+            st.note(f"bỏ qua: {e}")
+            log(f"bỏ việc này (chưa đăng gì): {e}")
+            state.save(st)
+            what = "bỏ qua"
+        except SoftLocked as e:
+            # X nghi là bot. Thử lại là tự chuốc án nặng hơn — dừng hẳn, chờ
+            # người xem.
+            st.note(f"X nghi bot: {e}")
+            state.save(st)
+            log(f"DỪNG HẲN: {e}")
+            log("  Đừng chạy lại ngay. Xem posts/.log/shots/ rồi đăng nhập tay "
+                "trên x.com bằng acc chính trước.")
+            return
         except (XError, Exception) as e:
             fails += 1
             st.note(f"lỗi ({fails}/{MAX_CONSECUTIVE_FAILS}): {type(e).__name__}: {e}")
@@ -556,16 +647,38 @@ async def loop(s, once: bool = False) -> None:
                 traceback.print_exc()
             state.save(st)
             if fails >= MAX_CONSECUTIVE_FAILS:
-                log("DỪNG: lỗi liên tiếp, không thử vòng nữa. Xem posts/.log/shots/")
-                return
-            what = "lỗi"
+                # KHÔNG thoát. Đêm 16/11 app thoát lúc 02:00 vì hai lỗi liên
+                # tiếp rồi nằm im tới 06:39 — mất gần năm tiếng, trong khi lỗi
+                # chỉ là tạm thời. Lỗi vĩnh viễn (cookie hết hạn, sai API key,
+                # X nghi bot) đã có nhánh riêng bắt ở trên và dừng hẳn; tới
+                # được đây thì gần như luôn là chuyện nhất thời: mạng, X chậm,
+                # giao diện đang tải. Nên nghỉ dài rồi thử lại, nghỉ lâu dần.
+                rests += 1
+                if rests > MAX_RESTS:
+                    log(f"DỪNG: đã nghỉ rồi thử lại {MAX_RESTS} lượt mà vẫn "
+                        "lỗi. Xem posts/.log/shots/")
+                    return
+                mins = ERROR_REST_MIN * rests
+                log(f"nghỉ {mins} phút rồi thử lại (lượt {rests}/{MAX_RESTS}) "
+                    "— xem posts/.log/shots/")
+                st.note(f"nghỉ {mins} phút sau lỗi liên tiếp")
+                state.save(st)
+                await asyncio.sleep(mins * 60)
+                fails = 0
+                what = "nghỉ sau lỗi"
+            else:
+                what = "lỗi"
         else:
+            # Một vòng chạy trót lọt thì xoá sạch tiền sử: các lượt nghỉ trước
+            # đó là vì chuyện đã qua.
+            rests = 0
             state.save(st)
 
         if once:
             log(f"--once: xong ({what})")
             return
 
+        state.beat(what)
         in_window = config.current_window() is not None
         nap = random.randint(60, 150) if in_window else config.rand_gap_sec(
             (config.IDLE_SLEEP_SEC[0] // 60, config.IDLE_SLEEP_SEC[1] // 60))
@@ -603,6 +716,7 @@ def main() -> int:
             url = web.start(s, args.port)
             log(f"trang theo dõi: {url}"
                 + ("  (đang chờ bạn duyệt từng bài)" if args.review else ""))
+            log(f"  mật khẩu: {web.password()}  (sửa trong {web.TOKEN_FILE})")
         except OSError as e:
             log(f"không mở được trang theo dõi ở cổng {args.port}: {e}")
             if args.review:

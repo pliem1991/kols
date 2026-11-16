@@ -36,6 +36,18 @@ class LoginExpired(XError):
     pass
 
 
+class XAborted(XError):
+    """Huỷ sạch: CHƯA đăng gì, không có gì sai lệch trên tài khoản.
+
+    Khác hẳn XError thường. XError nghĩa là "bấm đăng rồi mà không xác nhận
+    được" — có thể đã đăng, phải kiểm tay. XAborted nghĩa là app tự dừng trước
+    khi bấm vì điều kiện chưa đủ. Đêm 16/11 app CHẾT vì hai lần liên tiếp không
+    thấy thẻ quote: hai lần huỷ an toàn, không đăng gì, vậy mà bị đếm như lỗi
+    nặng và làm đứng cả vòng lặp tới sáng. Tách ra để chuyện bỏ một việc không
+    kéo theo chuyện bỏ cả đêm.
+    """
+
+
 class SoftLocked(XError):
     """X nghi là bot: hiện captcha / "This request looks like it might be
     automated" / bắt xác minh. Gặp cái này là DỪNG HẲN, không thử lại — thử lại
@@ -261,13 +273,22 @@ class XBrowser:
         await self.page.goto(COMPOSE_URL, wait_until="domcontentloaded", timeout=45_000)
         await self._type_into(SEL_BOX, f"{text}\n\n{target_url}")
         # Chờ thẻ quote hiện ra; không có thì bài sẽ thành bài thường kèm link.
+        #
+        # 12 giây là quá ngắn: ảnh chụp lúc 02:00 ngày 16/11 cho thấy ô soạn vẫn
+        # đang quay vòng tròn chờ X tải bản xem trước, link còn là chữ xanh. X
+        # phải gọi về máy chủ để dựng thẻ, lúc mạng chậm thì lâu hơn thế. Nới
+        # lên 30 giây và nhận thêm vài kiểu thẻ: 'attachments' là chỗ đính kèm
+        # nói chung, 'card.wrapper' là thẻ link, 'tweetPreview'/'blockquote' là
+        # bài gốc nhúng vào.
         try:
             await self.page.wait_for_selector(
-                '[data-testid="attachments"], [role="blockquote"]', timeout=12_000)
+                '[data-testid="attachments"], [data-testid="card.wrapper"], '
+                '[data-testid="tweetPreview"], [role="blockquote"]',
+                timeout=30_000)
         except PWTimeout:
             await self._shot("quote-card-missing")
-            raise XError("Không thấy thẻ quote gắn vào — huỷ để khỏi đăng thành "
-                         "bài thường kèm link trần")
+            raise XAborted("Không thấy thẻ quote gắn vào — huỷ để khỏi đăng "
+                           "thành bài thường kèm link trần")
         await self._click_send()
         url = await self._url_from_toast()
         if url:

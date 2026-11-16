@@ -31,23 +31,58 @@ impressions count toward payout, so it is the right audience twice over.
 A public, dated track record is the one thing on crypto X that cannot be faked.
 After 60-90 days it becomes the reason to follow.
 
-## Daily target: 4 posts + 1 thread
+## Daily target: 7 posts + 1 thread
 
-Deliberately fewer than the old 6. Six posts at 10 views each teach the ranker
-that this account's content does not hold attention. Fewer, better, longer.
+Raised from 4 on 2026-11-15 by the project owner, together with two new windows.
+The earlier "fewer, better" argument (six thin posts teach the ranker that this
+account does not hold attention) still holds for *quality*: every gate in
+`app/brain.py` stays. What changed is coverage — 4 posts all sat inside two
+windows, one of which measures worst (see below).
 
 ## Timing
 
-ICT = US Eastern **+ 12h**. Two windows only; everything else is US night.
+ICT = US Eastern **+ 12h**.
 
 | Window (ICT) | US ET | Content |
 |---|---|---|
+| 00:00 – 02:30 | 12:00 – 14:30 (prev. day) | 2 posts |
 | 07:30 – 09:30 | 19:30 – 21:30 (prev. day) | 1 post + the daily thread |
+| 11:00 – 13:00 | 23:00 – 01:00 | 1 post |
 | 20:00 – 23:30 | 08:00 – 11:30 | 3 posts |
 
-Never post 11:00-18:00 ICT: that is 23:00-06:00 ET, dead.
-
 Spacing inside a window: 45-90 min, randomized. Never back-to-back.
+
+### What the hours actually measure
+
+Measured 2026-11-15: 282 posts over 7 days from the 22 handles in
+`tools/reply_targets.txt`, bucketed by ICT hour, median views per bucket.
+
+| ICT block | posts | median views |
+|---|---|---|
+| 00 – 06 | 148 | 22,500 |
+| 07 – 09 | 27 | **29,600** |
+| 11 – 18 | 22 | 22,300 |
+| 20 – 23 | 74 | **15,300** |
+
+Two things the previous version of this file asserted turned out to be wrong:
+
+- "Never post 11:00-18:00 ICT, it is dead" — it is not. That block is European
+  morning and measures the same as the overnight hours.
+- The evening window was treated as the main slot (3 of 4 posts) while it is the
+  **weakest** of the four blocks.
+
+Keep the caveat in view: this measures when *other accounts'* audiences are
+awake, which is a proxy. At 6-17 views per post the binding constraint is
+distribution, not hour-of-day. Timing is a second-order lever; it is worth not
+choosing the worst block, and not worth more than that.
+
+## Replies run outside the windows too
+
+Changed 2026-11-15. The windows gate POSTS only. The reply branch runs all day
+on a slower cadence (`REPLY_GAP_OFF_WINDOW_MIN`, 15-30 min, versus 4-12 inside a
+window), because someone who mentions the account at 14:00 ICT should not wait
+until 20:00. The slower cadence is a rate-limit concession to the read-only
+twscrape account, which has hit its quota once (09:04, 2026-11-15).
 
 ## The subject is the market, not the tooling
 

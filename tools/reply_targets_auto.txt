@@ -1,0 +1,11 @@
+# App TỰ thêm. Đừng sửa tay — file này bị ghi đè.
+# Người viết tay thì sửa tools/reply_targets.txt.
+#
+# Nguồn thêm chỉ có hai (xem app/targets.py):
+#   mention  — người đã mention hoặc reply @macropandaX trước
+#   lam_tay  — người bạn đã tự bấm reply hoặc follow trong hàng đợi làm tay
+# Không bao giờ thêm từ tìm kiếm theo từ khoá: X cấm reply tự động kiểu đó.
+
+DamiDefi             # 98,048 follower · thêm 2026-11-15 · nguồn lam_tay
+TuanNguyen_6789      # 75,094 follower · thêm 2026-11-15 · nguồn mention
+Argona0x             # 40,805 follower · thêm 2026-11-16 · nguồn mention

@@ -28,6 +28,13 @@ class DayState:
     reposts_done: int = 0
     next_post_at: str | None = None
     next_reply_at: str | None = None
+    # Giãn riêng cho quote: khi thẻ quote không chịu gắn thì nghỉ một lúc chứ
+    # không thử lại mỗi vòng (thêm 16/11, xem runner.do_quote).
+    next_quote_at: str | None = None
+    # Bài bạn tự reply tay từ hàng đợi. Phải ghi lại, nếu không nhánh TỰ ĐỘNG
+    # không biết là bạn đã trả lời rồi (và ngược lại) — xem manual.mark.
+    manual_tweet_ids: list[str] = field(default_factory=list)
+    manual_authors: dict[str, int] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
 
     # --- truy vấn ----------------------------------------------------------
@@ -38,15 +45,26 @@ class DayState:
         if self.replies_done >= config.MAX_REPLIES_PER_DAY:
             return False
         a = author.lower()
-        return self.replied_authors.get(a, 0) < config.MAX_REPLIES_PER_AUTHOR_PER_DAY
+        # Cộng cả reply bạn gửi tay: người ngoài nhìn vào chỉ thấy MỘT tài khoản
+        # trả lời, không phân biệt máy hay người. Trần 2 bài/tác giả/ngày là để
+        # khỏi trông như bám theo một người, nên reply tay cũng phải tính.
+        n = self.replied_authors.get(a, 0) + self.manual_authors.get(a, 0)
+        return n < config.MAX_REPLIES_PER_AUTHOR_PER_DAY
 
     def already_replied(self, tweet_id: str) -> bool:
         return str(tweet_id) in self.replied_tweet_ids
 
     def already_touched(self, tweet_id: str) -> bool:
-        """Đã reply HOẶC đã quote bài này — đừng đụng vào lần hai."""
+        """Đã reply/quote/trả lời tay bài này — đừng đụng lần hai.
+
+        Xét cả NHỮNG NGÀY TRƯỚC. Trước 16/11 chỉ xét trong ngày, nên qua nửa
+        đêm là bài cũ quay lại hàng đợi: bài unlock của @DamiDefi
+        (2121953369665470503) bạn đã reply tay tối 15/11, sáng 16/11 lại hiện
+        ra như việc mới.
+        """
         t = str(tweet_id)
-        return t in self.replied_tweet_ids or t in self.quoted_tweet_ids
+        return (t in self.replied_tweet_ids or t in self.quoted_tweet_ids
+                or t in self.manual_tweet_ids or t in touched_before())
 
     def record_quote(self, author: str, tweet_id: str, url: str, text: str) -> None:
         self.quotes_done += 1
@@ -110,6 +128,69 @@ class DayState:
 
 def _path_for(day: str) -> Path:
     return config.STATE_DIR / f"state_{day}.json"
+
+
+# Bài đã đụng trong những ngày TRƯỚC. Ngày cũ không đổi nữa nên đọc một lần rồi
+# giữ, mỗi ngày mới dựng lại. 7 ngày là đủ: bài quá một tuần thì cổng tuổi bài
+# đã loại từ lâu, giữ thêm chỉ tốn bộ nhớ.
+TOUCHED_DAYS = 7
+_TOUCHED_CACHE: dict[str, set[str]] = {}
+
+# Nhịp tim: vòng lặp chạm vào mỗi vòng, trang theo dõi đọc ra. Không có nó thì
+# trang hiển thị y hệt nhau dù app đang ngủ bình thường hay đang nghỉ dài sau
+# lỗi — mà hai chuyện đó khác nhau hoàn toàn.
+_BEAT: list = [None, ""]
+
+
+def beat(what: str = "") -> None:
+    _BEAT[0] = config.now()
+    if what:
+        _BEAT[1] = what
+
+
+def last_beat() -> tuple[str, str, int]:
+    """(giờ, đang làm gì, bao nhiêu giây trước). Chưa đập lần nào -> ('', '', -1)."""
+    t = _BEAT[0]
+    if t is None:
+        return "", "", -1
+    return f"{t:%H:%M:%S}", _BEAT[1], int((config.now() - t).total_seconds())
+
+
+def touched_before(days: int = TOUCHED_DAYS) -> set[str]:
+    from datetime import timedelta
+    today = config.now().date()
+    key = f"{today:%Y%m%d}/{days}"
+    hit = _TOUCHED_CACHE.get(key)
+    if hit is not None:
+        return hit
+    ids: set[str] = set()
+    for i in range(1, days + 1):
+        p = _path_for(f"{today - timedelta(days=i):%Y%m%d}")
+        if not p.exists():
+            continue
+        try:
+            raw = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for fld in ("replied_tweet_ids", "quoted_tweet_ids", "manual_tweet_ids"):
+            ids.update(str(x) for x in (raw.get(fld) or []))
+    # Những ngày TRƯỚC 16/11 chưa có manual_tweet_ids, nên đọc thẳng sổ làm tay
+    # cũ: bài bạn đã bấm "Đã reply" hôm qua vẫn phải tính là đã đụng. Hôm nay
+    # thì không đọc ở đây — manual.mark ghi thẳng vào state, khỏi lệch cache.
+    for i in range(1, days + 1):
+        p = (config.STATE_DIR
+             / f"manual_{today - timedelta(days=i):%Y%m%d}.json")
+        if not p.exists():
+            continue
+        try:
+            rows = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        ids.update(str(r.get("id")) for r in rows
+                   if "reply" in (r.get("done") or []))
+    _TOUCHED_CACHE.clear()          # chỉ giữ của hôm nay
+    _TOUCHED_CACHE[key] = ids
+    return ids
 
 
 def load(day: str | None = None) -> DayState:
@@ -178,6 +259,36 @@ def own_posts_aged(min_days: int, max_days: int) -> list[dict]:
             if lo <= when <= hi:
                 found.append(item)
     return found
+
+
+def history(days: int = 14) -> list[dict]:
+    """Số liệu từng ngày trong `days` ngày gần nhất, cũ trước mới sau.
+
+    Ngày không có file state vẫn được trả về với số 0 — biểu đồ cần đủ cột liên
+    tục, thiếu ngày thì nhìn ra "ít" chứ không phải "không có dữ liệu".
+    """
+    from datetime import timedelta
+
+    today = config.now().date()
+    out: list[dict] = []
+    for i in range(days - 1, -1, -1):
+        d = today - timedelta(days=i)
+        row = {"date": f"{d:%Y-%m-%d}", "posts": 0, "threads": 0, "replies": 0,
+               "quotes": 0, "reposts": 0, "images": 0}
+        p = _path_for(f"{d:%Y%m%d}")
+        if p.exists():
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+            row["posts"] = sum((data.get("posts_done") or {}).values())
+            row["threads"] = 1 if data.get("thread_done") else 0
+            row["replies"] = int(data.get("replies_done") or 0)
+            row["quotes"] = int(data.get("quotes_done") or 0)
+            row["reposts"] = int(data.get("reposts_done") or 0)
+            row["images"] = len(data.get("images_used") or [])
+        out.append(row)
+    return out
 
 
 def append_log(kind: str, fields: dict) -> None:

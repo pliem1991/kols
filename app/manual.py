@@ -99,6 +99,29 @@ def pending() -> list[Item]:
     return [i for i in load() if i.open]
 
 
+def _sync_reply(item: "Item", ticked: bool) -> None:
+    """Chép việc reply TAY sang sổ chung, để nhánh tự động biết mà tránh.
+
+    Hai nhánh trước đây ghi vào hai chỗ khác nhau: nhánh tự động ghi vào
+    state_*.json, nhánh làm tay chỉ ghi vào manual_*.json. Không bên nào đọc
+    của bên kia, nên cùng một bài có thể được trả lời hai lần, và cùng một tác
+    giả có thể bị trả lời quá trần ngày (gặp 15/11 với @DamiDefi).
+    """
+    from . import state
+    st = state.load()
+    tid, author = str(item.id), item.author.lower()
+    if ticked:
+        if tid not in st.manual_tweet_ids:
+            st.manual_tweet_ids.append(tid)
+            st.manual_authors[author] = st.manual_authors.get(author, 0) + 1
+    else:
+        if tid in st.manual_tweet_ids:
+            st.manual_tweet_ids.remove(tid)
+            st.manual_authors[author] = max(
+                0, st.manual_authors.get(author, 0) - 1)
+    state.save(st)
+
+
 def mark(item_id: str, act: str) -> bool:
     """Tick một việc đã làm. act="close" thì đóng cả mục."""
     with LOCK:
@@ -113,6 +136,14 @@ def mark(item_id: str, act: str) -> bool:
                     i.done.remove(act)       # bấm lại = bỏ tick
                 else:
                     i.done.append(act)
+                    # Bạn tự bấm reply/follow dưới bài của ai thì người đó đáng
+                    # theo dõi tiếp — nguồn HỢP LỆ thứ hai để danh sách đối
+                    # tượng tự lớn lên (xem app/targets.py).
+                    if act in ("reply", "follow"):
+                        from . import targets
+                        targets.add(i.author, i.followers, "lam_tay")
+                if act == "reply":
+                    _sync_reply(i, ticked=act in i.done)
                 # KHÔNG tự đóng mục khi tick reply (sửa 14/11). Trước đây tick
                 # "Đã reply" là mục biến mất ngay, nên không tick thêm like hay
                 # bookmark cho cùng bài đó được nữa. Bốn nút độc lập; đóng mục
@@ -143,13 +174,36 @@ async def refill(settings, want: int = QUEUE_MAX) -> dict:
     st = state.load()
     room = want - len([i for i in items if i.open])
     if room <= 0:
-        return {"added": 0, "cands": 0, "skipped": ["hàng đợi đã đầy"]}
+        return {"added": 0, "cands": 0, "dupes": 0,
+                "skipped": ["hàng đợi đã đầy"]}
 
+    # Hai nguồn, không phải một. Nhánh reply TỰ ĐỘNG cũng ăn từ danh sách KOL và
+    # nó chạy trước (6-15 phút một lần), nên tới lượt hàng đợi làm tay thì bài
+    # nào ngon đã bị "touched" rồi — đo 15/11 lúc 08:3x: 3 ứng viên, cả 3 đều đã
+    # reply tự động hoặc đã nằm sẵn trong hàng đợi. Người mình follow là nguồn
+    # riêng, nhánh tự động chỉ dùng tới khi không còn mention nào.
     cands = await scan.find_candidates(window_min=config.MANUAL_WINDOW_MIN, top_n=15)
-    fresh = [c for c in cands
-             if c["id"] not in have and not st.already_touched(c["id"])]
+    seen_ids = {c["id"] for c in cands}
+    try:
+        more = await scan.find_from_following(
+            getattr(settings, "account_handle", ""),
+            window_min=config.MANUAL_WINDOW_MIN, top_n=15)
+        cands += [c for c in more if c["id"] not in seen_ids]
+    except Exception as e:
+        skipped_src = f"không đọc được danh sách following: {type(e).__name__}"
+    else:
+        skipped_src = ""
+
+    dupes = 0
+    fresh = []
+    for c in cands:
+        if c["id"] in have or st.already_touched(c["id"]):
+            dupes += 1
+            continue
+        fresh.append(c)
     if not fresh:
-        return {"added": 0, "cands": 0, "skipped": []}
+        return {"added": 0, "cands": len(cands), "dupes": dupes,
+                "skipped": [skipped_src] if skipped_src else []}
 
     new: list[Item] = []
     skipped: list[str] = []
@@ -167,7 +221,8 @@ async def refill(settings, want: int = QUEUE_MAX) -> dict:
             created_at=config.now().isoformat(),
         ))
     if not new:
-        return {"added": 0, "cands": len(fresh), "skipped": skipped}
+        return {"added": 0, "cands": len(fresh), "dupes": dupes,
+                "skipped": skipped}
 
     try:
         vi = brain.translate_vi(settings, [i.draft for i in new])
@@ -181,7 +236,8 @@ async def refill(settings, want: int = QUEUE_MAX) -> dict:
         have = {i.id for i in items}
         items.extend(i for i in new if i.id not in have)
         save(items)
-    return {"added": len(new), "cands": len(fresh), "skipped": skipped}
+    return {"added": len(new), "cands": len(fresh), "dupes": dupes,
+            "skipped": skipped}
 
 
 def summary() -> dict:
@@ -193,4 +249,7 @@ def summary() -> dict:
             if a in acts:
                 acts[a] += 1
     return {"pending": len([i for i in items if i.open]),
-            "closed": len(done_today), "acts": acts}
+            "closed": len(done_today), "acts": acts,
+            # Tổng số mục app đã soạn hôm nay — mẫu số cho biểu đồ trên trang:
+            # "3 lần like" không nói lên gì, "3 trên 7 mục" thì có.
+            "total": len(items), "target": QUEUE_MAX}
