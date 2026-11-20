@@ -62,9 +62,34 @@ check("posts_done luu duoc", st2.posts_in("evening") == 1, f"= {st2.posts_in('ev
 check("replies_done luu duoc", st2.replies_done == 1)
 check("nho da reply tweet 123", st2.already_replied("123"))
 check("chan reply tweet moi khi chua qua han", not st2.due("next_reply_at"))
-st2.replied_authors["someone"] = 2
-check("chan reply tac gia qua 2 lan", not st2.can_reply_to("SomeOne"))
+CAP = config.MAX_REPLIES_PER_AUTHOR_PER_DAY
+st2.replied_authors["someone"] = CAP - 1
+check(f"con cho khi moi {CAP - 1}/{CAP} lan", st2.can_reply_to("SomeOne"))
+st2.replied_authors["someone"] = CAP
+check(f"chan reply tac gia qua {CAP} lan", not st2.can_reply_to("SomeOne"))
+# Reply TAY phải cộng chung sổ, không thì trần chỉ chặn được một nửa.
+st2.replied_authors["mixedguy"] = CAP - 1
+st2.manual_authors["mixedguy"] = 1
+check("reply tay tinh chung vao tran", not st2.can_reply_to("MixedGuy"))
 check("tac gia khac van cho", st2.can_reply_to("Other"))
+
+# Muc lam tay de qua STALE_MIN phut thi tu rung, va khong con chiem suat trong
+# tran reply/tac gia nua (chot 17/11).
+from app import manual
+from datetime import timedelta
+now = config.now()
+old = manual.Item(id="x1", author="Stale", url="", followers=1, age_min=1,
+                  replies=0, their_text="", draft="d",
+                  created_at=(now - timedelta(minutes=manual.STALE_MIN + 5)).isoformat())
+fresh_i = manual.Item(id="x2", author="Fresh", url="", followers=1, age_min=1,
+                      replies=0, their_text="", draft="d",
+                      created_at=(now - timedelta(minutes=10)).isoformat())
+done_i = manual.Item(id="x3", author="Done", url="", followers=1, age_min=1,
+                     replies=0, their_text="", draft="d", done=["reply"],
+                     created_at=(now - timedelta(minutes=manual.STALE_MIN + 5)).isoformat())
+check("muc qua han bi tinh la rung", manual._stale(old, now))
+check("muc moi soan van giu", not manual._stale(fresh_i, now))
+check("muc da reply thi khong rung", not manual._stale(done_i, now))
 st2.replies_done = config.MAX_REPLIES_PER_DAY
 check("chan khi het han muc ngay", not st2.can_reply_to("Other"))
 Path(config.STATE_DIR / "state_29991231.json").unlink(missing_ok=True)
@@ -104,6 +129,46 @@ check("explainer khong dua report vao prompt",
       "does not need one" in brain._report_block("explainer"))
 check("market_read co dua report vao prompt",
       "does not need one" not in brain._report_block("market_read"))
+
+print("\n5b2) chu de co ban (them 18/11)")
+for pl in ("term", "ai", "money"):
+    check(f"co pillar {pl}", pl in config.POST_PILLARS and pl in brain.PILLAR_BRIEF)
+    check(f"{pl} khong doc chi bao", pl in brain.NO_INDICATOR_PILLARS)
+check("thread luan phien 2 kieu",
+      {config.thread_kind(config.now().replace(day=d)) for d in (1, 2)}
+      == set(config.THREAD_KINDS))
+# Chi chan dung viec chi cho xuong tien vao mot thu cu the.
+ok, why = brain.validate("You should invest in an index fund.",
+                         require_disclaimer=False)
+check("chan: chi cho xuong tien", not ok, why if not ok else "DA CHO QUA")
+# Chu du an chot 18/11: noi chuyen tien bac kieu Rich Dad Poor Dad khong phai
+# call keo, dung chan. Bo cu chan ca "build wealth", "financial freedom".
+for good in ("Compound interest doubles money in about 24 years at 3% a year.\n\n"
+             "Not financial advice.",
+             "Rich Dad Poor Dad draws one line that sticks: an asset pays you, "
+             "a liability bills you.",
+             "Most people are taught to work for money, never taught about money.",
+             "Paying yourself first means the saving happens before the spending."):
+    ok, why = brain.validate(good, pillar="money")
+    check(f"cho qua: {good[:30]}", ok, why if not ok else "")
+
+print("\n5b3) chu de strategy (them 18/11)")
+check("co pillar strategy", "strategy" in config.POST_PILLARS
+      and "strategy" in brain.PILLAR_BRIEF)
+# Khac moi pillar con lai: strategy DUOC goi ten chi bao, vi no day cach doc.
+check("strategy duoc doc chi bao", "strategy" not in brain.NO_INDICATOR_PILLARS)
+check("strategy khong duoc bang so hom nay",
+      "do not quote a live price" in brain._report_block("strategy"))
+check("day golden cross thi qua", brain.validate(
+    "A golden cross is when the 50-day average rises above the 200-day one.\n\n"
+    "Traders read it as a trend turning. It says nothing about why.\n\n"
+    "Not financial advice.", pillar="strategy")[0])
+ok, why = brain.validate("Golden cross on BTC. You should buy the dip.",
+                         pillar="strategy")
+check("chan: bien chi bao thanh keo", not ok, why if not ok else "DA CHO QUA")
+from app import chart_strategy
+check("chon anh theo chu trong bai",
+      chart_strategy.card_for.__doc__ is not None)
 
 print("\n5c) chan noi dung meta (viet ve chinh he thong)")
 for bad, label in (

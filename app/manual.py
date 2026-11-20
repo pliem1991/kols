@@ -61,6 +61,9 @@ class Item:
     done: list[str] = field(default_factory=list)   # việc đã làm
     created_at: str = ""
     closed: bool = False
+    # Đóng vì quá hạn, KHÔNG phải vì bạn làm xong. Tách ra để thống kê khỏi
+    # tính nhầm thành việc đã làm.
+    expired: bool = False
 
     @property
     def open(self) -> bool:
@@ -95,7 +98,39 @@ def save(items: list[Item]) -> None:
         encoding="utf-8")
 
 
+# Mục soạn xong mà để quá lâu thì tự bỏ. Lý do: draft bám vào một bài cụ thể —
+# qua 3 tiếng thì bài đó đã có thêm hàng chục reply, vào lúc này là chìm, mà
+# chỗ nó giữ trong trần reply/tác giả vẫn bị tính. Chủ dự án chốt 17/11.
+STALE_MIN = 180
+
+
+def _stale(i: "Item", now) -> bool:
+    """Quá hạn = mở, chưa reply, và soạn đã quá STALE_MIN phút."""
+    if not i.open or "reply" in i.done or not i.created_at:
+        return False
+    try:
+        born = datetime.fromisoformat(i.created_at)
+    except ValueError:
+        return False
+    return (now - born).total_seconds() > STALE_MIN * 60
+
+
+def expire() -> int:
+    """Đóng các mục quá hạn. Trả về số mục vừa đóng."""
+    with LOCK:
+        items = load()
+        now = config.now()
+        gone = [i for i in items if _stale(i, now)]
+        for i in gone:
+            i.closed = True
+            i.expired = True
+        if gone:
+            save(items)
+    return len(gone)
+
+
 def pending() -> list[Item]:
+    expire()
     return [i for i in load() if i.open]
 
 
@@ -168,6 +203,7 @@ async def refill(settings, want: int = QUEUE_MAX) -> dict:
     """
     from . import brain, scan, state
 
+    expire()      # trước khi đếm chỗ trống và trần reply/tác giả
     with LOCK:
         items = load()
     have = {i.id for i in items}
@@ -194,19 +230,42 @@ async def refill(settings, want: int = QUEUE_MAX) -> dict:
     else:
         skipped_src = ""
 
+    # Trần reply theo TÁC GIẢ. Trước 16/11 hàng đợi không đếm gì cả, nên cùng
+    # một ngày ra hai mục @CrewWatcherX. Đếm gộp ba nguồn vì cả ba đều kết
+    # thúc bằng một reply dưới tên @macropandaX:
+    #   - reply máy đã gửi      (st.replied_authors)
+    #   - reply tay bạn đã bấm  (st.manual_authors)
+    #   - mục còn treo trong hàng đợi — chỗ đã đặt trước, chưa dùng
+    used: dict[str, int] = {}
+    for src in (st.replied_authors, st.manual_authors):
+        for a, n in src.items():
+            used[a] = used.get(a, 0) + n
+    for i in items:
+        if i.open and "reply" not in i.done:
+            a = i.author.lower()
+            used[a] = used.get(a, 0) + 1
+
     dupes = 0
+    over_cap: set[str] = set()
     fresh = []
     for c in cands:
         if c["id"] in have or st.already_touched(c["id"]):
             dupes += 1
             continue
+        a = c["handle"].lower()
+        if used.get(a, 0) >= config.MAX_REPLIES_PER_AUTHOR_PER_DAY:
+            over_cap.add(c["handle"])
+            continue
+        used[a] = used.get(a, 0) + 1
         fresh.append(c)
+    cap_note = (f"đủ trần {config.MAX_REPLIES_PER_AUTHOR_PER_DAY} reply/ngày: "
+                + ", ".join("@" + h for h in sorted(over_cap))) if over_cap else ""
     if not fresh:
         return {"added": 0, "cands": len(cands), "dupes": dupes,
-                "skipped": [skipped_src] if skipped_src else []}
+                "skipped": [x for x in (skipped_src, cap_note) if x]}
 
     new: list[Item] = []
-    skipped: list[str] = []
+    skipped: list[str] = [cap_note] if cap_note else []
     for c in fresh[:room]:
         text, reason = brain.compose_reply(settings, c)
         if text is None:
@@ -241,7 +300,8 @@ async def refill(settings, want: int = QUEUE_MAX) -> dict:
 
 
 def summary() -> dict:
-    items = load()
+    expire()
+    items = [i for i in load() if not i.expired]
     done_today = [i for i in items if i.closed]
     acts: dict[str, int] = {a: 0 for a in ACTS}
     for i in items:
@@ -250,6 +310,10 @@ def summary() -> dict:
                 acts[a] += 1
     return {"pending": len([i for i in items if i.open]),
             "closed": len(done_today), "acts": acts,
+            # Mục tự rụng vì để quá STALE_MIN phút. Hiện lên trang chứ không
+            # im lặng: để quá nhiều nghĩa là app soạn nhiều hơn bạn bấm nổi.
+            "expired": len([i for i in load() if i.expired]),
+            "stale_min": STALE_MIN,
             # Tổng số mục app đã soạn hôm nay — mẫu số cho biểu đồ trên trang:
             # "3 lần like" không nói lên gì, "3 trên 7 mục" thì có.
             "total": len(items), "target": QUEUE_MAX}

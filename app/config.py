@@ -85,6 +85,10 @@ MENTION_WINDOW_MIN = int(os.environ.get("XKOLS_MENTION_WINDOW", "1440"))
 MANUAL_WINDOW_MIN = int(os.environ.get("XKOLS_MANUAL_WINDOW", "360"))
 
 MAX_REPLIES_PER_DAY = 35
+# Trần reply cho MỘT tác giả trong một ngày, tính CẢ máy lẫn tay. Người ngoài
+# nhìn vào chỉ thấy một tài khoản trả lời, không phân biệt ai bấm nút. Chủ dự
+# án chốt 3 ngày 16/11 sau khi thấy hàng đợi ra hai mục @CrewWatcherX, rồi hạ
+# xuống 2 ngày 17/11 — bám một người quá hai lần trong ngày là nhìn ra ngay.
 MAX_REPLIES_PER_AUTHOR_PER_DAY = 2
 
 # Ngoài cửa sổ đăng thì VẪN quét reply, chỉ thưa hơn (15-30 phút/lần thay vì
@@ -112,7 +116,19 @@ MAX_IMAGE_POSTS_PER_DAY = 4
 # meta, không ai theo dõi một account thị trường để đọc chuyện công cụ của nó.
 # Ba account tham khảo đều viết về thị trường và tin tức. Bộ mới bám theo đó.
 # track_record cố ý KHÔNG nằm đây: thread buổi sáng đã lo phần đó.
-POST_PILLARS = ("news", "trend", "market_read", "explainer", "take", "wry")
+POST_PILLARS = ("news", "trend", "market_read", "explainer", "take", "wry",
+                "term", "ai", "money", "strategy")
+
+# Thread buổi sáng luân phiên hai kiểu, theo ngày chẵn/lẻ. Trước 18/11 thread
+# luôn là thread thị trường; chủ dự án muốn thêm loại hướng dẫn cơ bản cho
+# người mới. Luân phiên chứ không thay hẳn: thread thị trường là chỗ duy nhất
+# ghi lại track record theo ngày. Thêm một cái lợi: thread "basics" không cần
+# dữ liệu thị trường, nên hôm nào không lấy được giá vẫn có thread để đăng.
+THREAD_KINDS = ("market", "basics")
+
+
+def thread_kind(t: datetime | None = None) -> str:
+    return THREAD_KINDS[(t or now()).timetuple().tm_yday % len(THREAD_KINDS)]
 
 REPOST_PER_DAY = 1
 REPOST_MIN_AGE_DAYS = 3

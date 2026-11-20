@@ -70,6 +70,13 @@ def pick_image(st: state.DayState, text: str, pillar: str = "",
                     "-> đăng không ảnh")
                 return None
             p = chart.trend_card(trends)
+        elif pillar == "strategy":
+            # Ảnh dạy mẫu hình: vẽ ĐÚNG mẫu hình bài đang nói, và chỉ khi tìm
+            # được ví dụ thật trong dữ liệu giá (xem app/chart_strategy.py).
+            from . import chart_strategy
+            p = chart_strategy.card_for(text)
+            if p is None:
+                log("  bài strategy: không tìm được ví dụ thật -> đăng không ảnh")
         elif pillar == "explainer" and settings is not None:
             spec = brain.mechanism_steps(settings, text)
             p = chart.flow_card(spec["title"], spec["steps"],
@@ -143,9 +150,10 @@ def dry_write(kind: str, text: str, extra: str = "") -> None:
 
 # --- từng hành động ----------------------------------------------------------
 async def do_thread(s, st: state.DayState) -> bool:
-    log("soạn thread buổi sáng...")
+    kind = config.thread_kind()
+    log(f"soạn thread buổi sáng ({'thị trường' if kind == 'market' else 'kiến thức cơ bản'})...")
     try:
-        parts = brain.compose_thread(s)
+        parts = brain.compose_thread(s, kind=kind)
     except brain.StaleReport as e:
         st.note(f"bỏ thread: {e}")
         st.thread_done = True        # không thử lại cả ngày, tránh đốt token
@@ -172,7 +180,8 @@ async def do_thread(s, st: state.DayState) -> bool:
         dry_write("THREAD", "\n\n---\n\n".join(parts),
                   f"{len(parts)} bài" + (f" · ảnh: {image}" if image else ""))
         st.record_post("morning", "DRY", parts[0], kind="thread",
-                       pillar="track_record", image=image or "")
+                       pillar="track_record" if kind == "market" else "money",
+                       image=image or "")
         if image:
             st.images_used.append(image)
         log(f"  [dry] thread {len(parts)} bài"
@@ -184,7 +193,8 @@ async def do_thread(s, st: state.DayState) -> bool:
     if image:
         st.images_used.append(image)
     st.record_post("morning", url or "?", parts[0], kind="thread",
-                   pillar="track_record", image=image or "")
+                   pillar="track_record" if kind == "market" else "money",
+                   image=image or "")
     state.append_log("post", {"url": url or "?", "chars": len(parts[0]),
                               "text": f"THREAD({len(parts)}) " + parts[0]})
     log(f"  đã đăng thread: {url or '(không bắt được URL)'}")

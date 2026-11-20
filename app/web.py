@@ -573,7 +573,10 @@ function v_manual(d){
     + line('reply','var(--acc)') + line('like','var(--ok)')
     + line('follow','var(--warn)') + line('bookmark','var(--no)')
     + '<div class="sub" style="margin-top:4px">Mục tiêu '+(ms.target||10)
-    + ' mục/ngày — hôm nay app soạn được '+(ms.total||0)+'.</div></div>';
+    + ' mục/ngày — hôm nay app soạn được '+(ms.total||0)+'.'
+    + (ms.expired ? ' Bỏ '+ms.expired+' mục để quá '
+        + Math.round((ms.stale_min||180)/60)+' giờ chưa reply.' : '')
+    + '</div></div>';
   h += d.manual.length ? d.manual.map(manualCard).join('')
      : '<div class="empty">Chưa có mục nào — bấm "Tạo tiếp", hoặc đợi app tự nạp.</div>';
   return h + '</div>';

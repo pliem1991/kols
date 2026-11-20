@@ -24,8 +24,24 @@ for posts about the pipeline that wrote the post. Do not write about "our agents
 AI-generated, the closing disclosure already says so and that is enough. Data from \
 the pipeline is a SOURCE for claims about the market, never the topic.
 
-Audience: English-speaking developers, quants and semi-professional traders in the US \
-and EU — people who want the number and the mechanism, not hype.
+Audience: ordinary English-speaking people on X who follow crypto and AI out of \
+interest. Assume the reader owns a little Bitcoin, has seen a price chart, and knows \
+NOTHING beyond that. They do not know what funding, basis, an oracle, a liquidation \
+cascade or an ETF creation basket is — and they will not look it up. They will scroll \
+past.
+
+WRITE PLAIN. This matters more than being clever or precise:
+- At most ONE term the reader may not know per post, defined in the same breath in \
+ordinary words: "funding — the fee traders pay to keep a bet open".
+- Prefer the common word. Fee, not basis. Forced selling, not deleveraging. The price \
+on the exchange, not venue mid. Borrowed money, not leverage.
+- No insider shorthand: RSI14, delta, gamma, perp, the tape, bid depth. market_read \
+may cite ONE indicator, and only if it says in plain words what the thing measures.
+- If a post needs two sentences of background before it lands, it is the wrong post. \
+Pick something simpler.
+- The test before returning a draft: would someone who has owned a little Bitcoin for \
+a year, and nothing else, get this in one read? If not, rewrite it simpler. A correct \
+post nobody understands is worth less than a simple one that is also true.
 
 LEGAL LIMITS — these are law, not style. The account holder is in Vietnam and holds \
 no financial licence. Vietnam's securities regulator treats an unlicensed buy/sell \
@@ -196,6 +212,12 @@ CALL_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"\bguaranteed\b|\brisk[- ]free\b|\bcan'?t lose\b|\bbao l(?:ã|a)i\b", "hứa hẹn lợi nhuận"),
     (r"\b(?:ape|aping) in\b|\bfull port\b|\ball in\b", "khuyên vào hết"),
     (r"\bnot too late to\b|\blast chance to\b", "giục xuống tiền"),
+    # Thêm rồi bỏ lại 18/11. Bộ cũ chặn "financial freedom", "build wealth",
+    # "you should save" — quá tay: nói chuyện tiền bạc kiểu Rich Dad Poor Dad
+    # không phải call kèo. Chỉ còn một mẫu, nhắm đúng việc chỉ chỗ xuống tiền
+    # vào một thứ cụ thể; khuyên tiết kiệm hay tiêu ít đi thì không chặn.
+    (r"\b(?:you|u) should (?:invest|put your money)\s+(?:in|into)\b",
+     "chỉ chỗ xuống tiền"),
 )
 
 # Dấu hiệu bài có chạm tới thị trường -> buộc phải có ghi chú.
@@ -265,7 +287,8 @@ def find_call(text: str) -> str | None:
 INDICATOR_RE = re.compile(
     r"\b(RSI\d*|MACD|Bollinger|SMA\s?\d+|EMA\s?\d+|ATR\d*|moving average|"
     r"overbought|oversold|golden cross|death cross)\b", re.I)
-NO_INDICATOR_PILLARS = ("take", "explainer", "wry", "trend")
+NO_INDICATOR_PILLARS = ("take", "explainer", "wry", "trend",
+                        "term", "ai", "money")
 
 
 def uses_indicators(text: str) -> str | None:
@@ -341,6 +364,60 @@ def news_block(news: list[dict] | None) -> str:
     return "\n".join(lines)
 
 
+STRATEGY_NOTES = """REFERENCE — checked facts. Use these, never invent a parameter,
+a date of origin or a success rate.
+
+Golden Cross / Death Cross
+- One event, two names: the 50-period average crossing the 200-period average. Fast
+  above slow is a GOLDEN CROSS; fast below slow is a DEATH CROSS. Use the names.
+- The classic definition uses SIMPLE moving averages, 50 and 200 periods. The
+  exponential version (EMA) is common too and crosses a few days earlier, because it
+  weights recent prices more heavily. Say which one you mean.
+- Both lines are averages of prices that already happened, so the signal is late by
+  construction. It confirms a move that has been running; it does not forecast one.
+- Crypto trades every day, so a "50-day" average covers 50 calendar days. For a stock
+  the same 50 trading days is about ten weeks.
+- Shorter pairs exist (10/50) for faster signals, at the cost of more false ones.
+
+RSI — Relative Strength Index
+- Wilder, 1978. Default setting 14 periods. It scores how much of the recent movement
+  was up versus down, on a 0-100 scale. The 70 and 30 lines are conventions for
+  "overbought" and "oversold", not rules, and a strong trend can sit outside them for
+  weeks.
+- Four divergence types, and they are not the same thing:
+  · Regular bearish — price makes a higher high, RSI a lower high. Uptrend losing speed.
+  · Regular bullish — price makes a lower low, RSI a higher low. Downtrend losing speed.
+  · Hidden bearish — price a lower high, RSI a higher high, inside a downtrend. Reads
+    as continuation, not reversal.
+  · Hidden bullish — price a higher low, RSI a lower low, inside an uptrend. Also
+    continuation.
+- Divergence on its own is weak evidence. Losing speed is not turning around.
+
+MACD
+- Appel, 1979. The 12-period EMA minus the 26-period EMA is the MACD line; a 9-period
+  EMA of that line is the signal; the bars are the gap between the two.
+- In a sideways market it crosses back and forth with nothing following (whipsaw).
+  Faster settings produce more crossings and more noise, slower ones arrive later.
+
+Bollinger Bands
+- A 20-period simple average with bands two standard deviations above and below.
+  The bands widen when volatility rises and narrow when it falls.
+- Two standard deviations does NOT mean 95% of prices stay inside: price moves are
+  not normally distributed. Do not claim that figure.
+- Settings that fit one asset often fail on another.
+
+Support, resistance, volume
+- A level is simply a price where buyers or sellers showed up before — memory, not a
+  mechanism, and it holds until it does not.
+- Volume is how much changed hands. One large order can inflate it, and it never says
+  who was buying.
+
+HONESTY — there is no credible public win rate for any of these, so never state one,
+and never say a pattern "works X% of the time". Always say what the tool cannot see.
+
+"""
+
+
 def _report_block(pillar: str) -> str:
     """Chỉ đưa số liệu thị trường vào prompt khi pillar thật sự cần.
 
@@ -348,6 +425,16 @@ def _report_block(pillar: str) -> str:
     báo vào chỉ kéo bài quay về bản tin giá. take bị cắt bảng từ 14/11 vì lý do
     tương tự: đưa bảng vào là nó viết lại đúng bài market_read.
     """
+
+
+    if pillar == "strategy":
+        # Được phép gọi tên chỉ báo, nhưng KHÔNG được đưa bảng số hôm nay vào:
+        # bài này dạy cách đọc một mẫu hình, không phải bản tin giá. Đưa bảng
+        # vào là nó lại viết thành market_read (đúng lỗi đã gặp với take 14/11).
+        return (STRATEGY_NOTES
+                + "No market table for this pillar. You are teaching how a tool is\n"
+                  "read, not reading today's market — do not state what any\n"
+                  "indicator says right now, and do not quote a live price.\n\n")
     if pillar in NO_INDICATOR_PILLARS:
         return ("No market table for this pillar — it does not need one, and a\n"
                 "hard check rejects the post if it reads an indicator (RSI, MACD,\n"
@@ -373,17 +460,26 @@ topics, and do not treat a headline as a verified fact: attribute it ("X is surf
     "market_read": """What the market is actually doing right now, carrying real figures:
 a level that broke, a move in percent, flows, liquidations, a correlation that stopped
 holding. Say what it means in one line. Describe — never tell anyone what to do with
-it. Needs the disclosure. This is the ONLY pillar allowed to read indicators, so use
-that room: prefer price action, levels and percentage moves over a plain momentum
-readout, and if you cite an indicator, say what it does NOT tell you.""",
-    "explainer": """Explain one mechanism a reader keeps seeing but may not understand:
-how a liquidation cascade feeds itself, what an ETF outflow actually moves, why funding
-flips, how an oracle price differs from a spot price, what a model's oversold reading
-does and does not tell you. Concrete, one idea, no jargon left undefined.""",
-    "take": """An argument about how this market or this industry WORKS — incentives,
-structure, who is positioned how, what a widely repeated belief gets wrong. Name the
-view, say where it breaks, give the mechanism, and add a claim of your own. Not
-contrarian for its own sake, not an attack on a named person.
+it. Needs the disclosure. This is the ONLY pillar allowed to read indicators, but say
+it in words a beginner follows: "the price fell 6% in a day, the biggest drop since
+September" beats any indicator name. If you do cite one, say in plain words what it
+measures and what it does NOT tell you — and never more than one in a post.""",
+    "explainer": """Explain, in plain words, ONE thing a beginner keeps seeing and has
+never had explained: why the price is different on two exchanges, what actually happens
+when someone gets "liquidated", where the money goes when the price falls, what an ETF
+buying Bitcoin really does, why a coin can rise while the news is bad.
+
+Pitch it at someone who owns a little Bitcoin and nothing else. If explaining it needs
+a second term they also do not know, pick a different thing to explain. One idea, no
+jargon left undefined, and no term in the post that the post itself does not explain.""",
+    "take": """An argument about how this market or this industry WORKS — who makes
+money from what, what a widely repeated belief gets wrong. Name the view, say where it
+breaks, and add a claim of your own. Not contrarian for its own sake, not an attack on
+a named person.
+
+Keep it to something a newcomer can follow without knowing market structure: "the
+exchange earns on trading, not on the price going up" lands; an argument about basis
+spreads does not. Everyday words, no insider framing.
 
 You get no market table, and a hard check rejects the post if it reads an indicator.
 That is deliberate: reading today's candles is market_read's job, and when take did
@@ -394,6 +490,57 @@ a trader's chair. No fake personal life, no travel, no photos of a laptop, no "g
 morning". Nothing about this account's own software.""",
     "track_record": """What the data showed on a given date and how that reading turned
 out since — described, never recommended. Date every figure.""",
+    "term": """Define ONE term the reader sees every day on this timeline and has never
+had explained: stablecoin, market cap, liquidity, a fork, gas, custody, an ETF, a
+bear market, dilution, yield. Open with the plainest one-line definition you can
+write, then one line on why it matters to an ordinary holder, then one line on what
+people get wrong about it.
+
+No second undefined term anywhere in the post. No figures needed — if you use one, it
+needs the disclosure. This is a dictionary entry with an opinion, not a market post.""",
+    "ai": """One thing about AI that a non-engineer can follow: what a model can and
+cannot do, what a company just shipped and what it changes for ordinary users, what a
+number in an AI announcement actually measures, where the money in AI goes. Plain
+words, no benchmark names left undefined, no model-architecture talk.
+
+Nothing about THIS account's own software — that rule still holds.""",
+    "strategy": """Explain ONE thing traders use, so plainly that someone who has
+never opened a trading app understands it: the 50-day and 200-day moving averages
+crossing, RSI divergence, support and resistance, what a moving average even is, what
+volume adds, what a stop is for, why the same pattern works until everyone watches it.
+
+Two of these can be drawn as a chart and the rest cannot: the 50/200 moving-average
+cross, and RSI divergence. Prefer those two unless you have covered them recently —
+when the post names one, a real example from price history goes out with it.
+
+Shape: what the thing is, in one line and in ordinary words. Then what traders believe
+it tells them — attributed, "traders read this as", never asserted by you. Then, and
+this part is required, when it fails or what it cannot see.
+
+This is the ONE pillar outside market_read that may name indicators. In exchange it is
+teaching only: never say what any indicator reads right now, never quote today's price,
+never say what to do with it. "A golden cross is when the 50-day average rises above
+the 200-day one" is teaching. "Golden cross — time to buy" is a call and is banned.
+
+Because the post names an indicator, it must end with "Not financial advice." written
+out in full.""",
+    "money": """How money works, for someone who was never taught: what inflation does
+to cash sitting still, how compound interest builds, what a fee of 1% a year costs
+over twenty years, why an emergency buffer is what keeps people from selling at the
+worst moment, what "saving" and "investing" mean and how they differ.
+
+The one line you may not cross: never point at a specific thing to put money into —
+no coin, no stock, no fund, no index, no product. "You should invest in X" is advice
+and is banned, and so is any promise that a return is certain.
+
+Everything else about money is open. Ideas from the personal-finance canon are welcome
+— Rich Dad Poor Dad on assets versus liabilities, The Richest Man in Babylon on paying
+yourself first, Kiyosaki on being taught to work for money and never about money. Use
+them as ideas in your own words; if you quote a line, keep it short and name the book.
+Saying that saving beats spending, that debt costs, that most people are never taught
+this, is normal talk about money, not a recommendation.
+
+Matter-of-fact, not a guru. Do the arithmetic when there is arithmetic to do.""",
 }
 
 
@@ -506,12 +653,63 @@ def _pass_or_repair(settings, model: str, drafts: list[str],
     return kept
 
 
-def compose_thread(settings) -> list[str]:
+BASICS_THREAD = """Write a teaching thread: 5 or 6 posts, each under %d characters.
+
+This is a BASICS thread for someone who follows crypto and AI out of interest and was
+never taught how money works. Pick ONE subject and take it from nothing to understood,
+one step per post. Subjects that fit: what inflation does to cash left sitting, how
+compound interest builds and how long doubling takes, what a 1%% yearly fee costs over
+twenty years, the difference between saving and investing, why an emergency buffer is
+what stops people selling at the worst moment, how a bank actually makes money on a
+deposit, what a credit card's interest rate really costs per month.
+
+Shape: (1) the question in plain words, and why it matters,
+(2)-(4) one step each, with the arithmetic worked out in small numbers,
+(5) what people get wrong about it,
+(6) a closing post stating the analysis is AI-generated and carrying
+"Not financial advice." written out in full. Never abbreviate it to "NFA".
+
+The one line you may not cross: never point at a specific thing to put money into —
+no coin, no stock, no fund, no index, no product — and never promise that a return is
+certain. Everything else about money is open, including ideas from the personal-finance
+canon (Rich Dad Poor Dad, The Richest Man in Babylon) in your own words; if you quote
+a line, keep it short and name the book. Habits, saving, debt and what school never
+taught are normal subjects, not recommendations.
+
+Plain words throughout. At most one term the reader may not know, defined in the same
+breath. Use small round numbers a person can picture — $1,000, not basis points.
+
+Return JSON: {"thread": ["...", "..."]}""" % config.MAX_POST_CHARS
+
+
+def compose_thread(settings, kind: str = "market") -> list[str]:
     """Thread buổi sáng — nguồn impression lớn nhất trong ngày.
 
-    Trả [] nếu không có report, hoặc report quá cũ: thread là cột sống của track
-    record, đăng bằng số liệu hôm qua thì hỏng chính thứ đang xây.
+    kind="basics" là thread dạy kiến thức cơ bản, KHÔNG cần dữ liệu thị trường
+    (thêm 18/11). kind="market" trả [] nếu không có report, hoặc report quá cũ:
+    thread thị trường là cột sống của track record, đăng bằng số liệu hôm qua
+    thì hỏng chính thứ đang xây.
     """
+    if kind == "basics":
+        raw = _ask_json(settings, config.MODEL_POST, BASICS_THREAD, max_tokens=6000)
+        parts = [p.strip() for p in raw.get("thread", []) if p.strip()]
+        fixed = _pass_or_repair(settings, config.MODEL_POST, parts,
+                                require_disclaimer=False, check_meta=False)
+        if len(fixed) != len(parts):
+            return []
+        if not fixed:
+            return []
+        ok, why = validate_thread(fixed)
+        if not ok:
+            # Thiếu ghi chú ở bài cuối thì vá được; lỗi khác (call kèo, quá dài)
+            # thì bỏ cả thread, không chữa.
+            if "bài cuối" not in why and "không có ghi chú" not in why:
+                return []
+            fixed[-1] = fixed[-1].rstrip() + "\n\nNot financial advice."
+            if not validate_thread(fixed)[0]:
+                return []
+        return fixed
+
     snaps = market.get()
     if not snaps:
         raise StaleReport("không lấy được dữ liệu thị trường — bỏ thread hôm nay")
