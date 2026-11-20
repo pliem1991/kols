@@ -1,0 +1,15 @@
+# Chỉ để đóng gói dashkit/ cho project khác cài được. App X trong app/ không
+# cài qua đây — nó chạy thẳng bằng `python -m app` ngay trong thư mục này.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dashkit"
+version = "0.1.0"
+description = "Khung màn hình theo dõi chạy local — server, cổng mật khẩu, CSS, JS khung"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["dashkit"]

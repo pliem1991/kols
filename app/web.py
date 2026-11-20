@@ -1,7 +1,8 @@
-"""Trang theo dõi chạy local — http://127.0.0.1:8787
+"""Trang theo dõi của app X — phần riêng của X.
 
-Dùng http.server của thư viện chuẩn, không thêm phụ thuộc nào. Chạy trong thread
-riêng, bind 127.0.0.1 nên không ai ngoài máy này vào được.
+Khung trang (server, cổng mật khẩu, CSS, JS đổi mục/tự nạp lại/biểu đồ cột)
+nằm trong dashkit/ từ 20/11, để project Facebook dùng lại được. Ở đây chỉ còn:
+các mục của riêng X, số liệu nhồi vào /api/state, và mấy nút gọi về app.
 
 Bản tiếng Việt trên trang CHỈ để đọc. Bài đăng lên X luôn là bản tiếng Anh.
 
@@ -12,12 +13,7 @@ Trước 15/11 tất cả nằm chung một cột dài: cuộn mãi mới tới 
 """
 from __future__ import annotations
 
-import json
-import mimetypes
-import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlparse
+import dashkit
 
 from . import config, manual, payout, review, state, stats, targets
 
@@ -25,332 +21,42 @@ HOST = "127.0.0.1"
 DEFAULT_PORT = 8787
 HISTORY_DAYS = 14
 
-# --- khóa cửa ----------------------------------------------------------------
 # Trang này KHÔNG chỉ để xem: nó dừng được app, duyệt được bài đăng thật lên
 # @macropandaX, và bấm "Tạo tiếp" là gọi Opus mấy lần (tốn tiền). Khi đưa ra
 # internet qua Cloudflare tunnel (15/11) thì bất kỳ ai có link đều làm được
-# ngần đó, mà hostname công khai thì bot quét ra.
-#
-# Token áp cho MỌI request, kể cả từ 127.0.0.1. Lý do không miễn cho localhost:
-# cloudflared chạy ngay trên máy này nên request từ tunnel cũng hiện ra là
-# 127.0.0.1 — miễn theo IP là mở toang. Phân biệt bằng header CF-Connecting-IP
-# thì phải TIN vào header, hỏng một lần là mất quyền điều khiển tài khoản.
+# ngần đó, mà hostname công khai thì bot quét ra. Luật của cổng và lý do chọn
+# như vậy nằm trong dashkit/gate.py.
 #
 # File giữ token nằm ở tools/ chứ không phải posts/: endpoint /img phục vụ mọi
 # file trong posts/, để token ở đó là tự đưa chìa khóa qua cửa sổ.
-#
-# Vào bằng MẬT KHẨU (thêm 15/11 theo yêu cầu). Token vẫn còn nhưng tụt xuống
-# làm giá trị cookie — tức là "đã đăng nhập", không còn là cách vào nữa. Để
-# token trong URL thì nó nằm lại trong lịch sử trình duyệt, trong link chia sẻ,
-# trong ảnh chụp màn hình; mật khẩu gõ vào form thì không.
 TOKEN_FILE = config.TOOLS / "web.env"
-_SECRETS: dict[str, str] = {}
 
-
-def _read_secrets() -> dict[str, str]:
-    out: dict[str, str] = {}
-    if TOKEN_FILE.exists():
-        for line in TOKEN_FILE.read_text(encoding="utf-8").splitlines():
-            k, _, v = line.partition("=")
-            if k.strip() and v.strip():
-                out[k.strip()] = v.strip()
-    return out
-
-
-def _secret(key: str, nbytes: int) -> str:
-    """Đọc một bí mật trong tools/web.env, chưa có thì sinh rồi ghi lại."""
-    global _SECRETS
-    if not _SECRETS:
-        _SECRETS = _read_secrets()
-    if _SECRETS.get(key):
-        return _SECRETS[key]
-    import secrets
-    _SECRETS[key] = secrets.token_urlsafe(nbytes)
-    TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
-    TOKEN_FILE.write_text(
-        "".join(f"{k}={v}\n" for k, v in _SECRETS.items()), encoding="utf-8")
-    return _SECRETS[key]
-
-
-def token() -> str:
-    """Giá trị cookie cấp sau khi đăng nhập đúng."""
-    return _secret("XKOLS_WEB_TOKEN", 24)
+# Tên cookie "xk" đã cấp cho trình duyệt từ 15/11 — đổi là mọi người đang đăng
+# nhập bị đẩy ra. App khác (Facebook) PHẢI dùng tên khác, xem dashkit/gate.py.
+GATE = dashkit.Gate(env_file=TOKEN_FILE,
+                    token_key="XKOLS_WEB_TOKEN",
+                    pass_key="XKOLS_WEB_PASS",
+                    now=config.now,
+                    cookie="xk")
 
 
 def password() -> str:
     """Mật khẩu vào trang. Đổi bằng cách sửa tools/web.env rồi khởi động lại."""
-    return _secret("XKOLS_WEB_PASS", 9)
+    return GATE.password()
 
 
-# Chặn dò mật khẩu. Hostname công khai thì bot sẽ thử, mà qua tunnel mọi request
-# đều hiện ra là 127.0.0.1 nên không đếm theo IP được — đếm chung một sổ. Trang
-# một người dùng, khóa cả cụm 5 phút là chấp nhận được.
-MAX_TRIES = 8
-LOCK_MIN = 5
-_GUARD = {"fails": 0, "until": None}
+NAV = [
+    dashkit.Nav("overview", "Tổng quan"),
+    dashkit.Nav("manual", "Việc làm tay", badge=True),
+    dashkit.Nav("stats", "Kết quả thật"),
+    dashkit.Nav("targets", "Đối tượng reply"),
+    dashkit.Nav("pending", "Chờ duyệt", badge=True),
+    dashkit.Nav("posted", "Đã đăng", badge=True),
+    dashkit.Nav("ctl", "Điều khiển", foot=True),
+]
 
 
-def _locked() -> int:
-    """Còn bị khóa bao nhiêu giây."""
-    u = _GUARD["until"]
-    if u is None:
-        return 0
-    left = (u - config.now()).total_seconds()
-    if left <= 0:
-        _GUARD.update(fails=0, until=None)
-        return 0
-    return int(left)
-
-
-def _note_fail() -> None:
-    from datetime import timedelta
-    _GUARD["fails"] += 1
-    if _GUARD["fails"] >= MAX_TRIES:
-        _GUARD["until"] = config.now() + timedelta(minutes=LOCK_MIN)
-
-
-LOGIN = """<!doctype html>
-<html lang="vi"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>XKols</title><style>
-*{box-sizing:border-box}
-body{margin:0;min-height:100vh;display:flex;align-items:center;
- justify-content:center;background:#0d1117;color:#e6edf3;
- font:16px/1.5 ui-sans-serif,system-ui,'Segoe UI',sans-serif}
-form{width:100%;max-width:320px;padding:24px}
-h1{font-size:19px;margin:0 0 4px}
-p{margin:0 0 20px;color:#8b949e;font-size:14px}
-input{width:100%;padding:12px 14px;font-size:16px;border-radius:8px;
- border:1px solid #30363d;background:#161b22;color:#e6edf3}
-input:focus{outline:none;border-color:#4493f8}
-button{width:100%;margin-top:12px;padding:12px;font-size:15px;font-weight:600;
- border:0;border-radius:8px;background:#238636;color:#fff;cursor:pointer}
-.err{color:#f85149;font-size:14px;margin-top:14px}
-</style></head><body>
-<form method="post" action="/login">
-<h1>XKols</h1>
-<p>Trang điều khiển. Cần mật khẩu.</p>
-<input type="password" name="p" autofocus autocomplete="current-password"
- placeholder="Mật khẩu">
-<button type="submit">Vào</button>
-__ERR__
-</form></body></html>"""
-
-PAGE = """<!doctype html>
-<html lang="vi"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>XKols</title>
-<style>
-:root{
- --bg:#f4f6fb; --card:#fff; --line:#e8ecf4; --fg:#101828; --mut:#667085;
- --acc:#4f6cff; --acc-soft:#eef1ff; --ok:#12a150; --ok-soft:#e8f8ef;
- --no:#e5484d; --no-soft:#fdecec; --warn:#d97706; --warn-soft:#fdf3e4;
- --shadow:0 1px 2px rgba(16,24,40,.04), 0 10px 28px rgba(16,24,40,.06);
- --r:16px;
-}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);
- font:15px/1.6 "Inter",ui-sans-serif,system-ui,"Segoe UI",sans-serif;
- -webkit-font-smoothing:antialiased}
-a{color:var(--acc)}
-.shell{display:flex;min-height:100vh}
-
-/* ---- sidebar ---- */
-.side{width:224px;flex:none;background:var(--card);border-right:1px solid var(--line);
- padding:22px 14px;display:flex;flex-direction:column;gap:4px;position:sticky;top:0;
- height:100vh}
-.brand{display:flex;align-items:center;gap:10px;padding:0 8px 18px;font-weight:700;
- font-size:17px;letter-spacing:-.01em}
-.brand i{width:30px;height:30px;border-radius:9px;background:var(--acc);color:#fff;
- display:grid;place-items:center;font-style:normal;font-size:15px}
-.nav{display:block;padding:9px 12px;border-radius:11px;color:var(--mut);
- text-decoration:none;font-size:14.5px;font-weight:500;cursor:pointer}
-.nav:hover{background:var(--bg)}
-.nav.on{background:var(--acc);color:#fff}
-.nav .n{float:right;font-size:12px;opacity:.8}
-.navsep{margin-top:auto}
-.sidefoot{border-top:1px solid var(--line);padding-top:14px;margin-top:14px;
- font-size:12.5px;color:var(--mut)}
-.sidefoot b{display:block;color:var(--fg);font-size:14px}
-
-/* ---- main ---- */
-.main{flex:1;min-width:0;padding:22px 26px 56px}
-.top{display:flex;align-items:center;justify-content:space-between;gap:16px;
- flex-wrap:wrap;margin-bottom:18px}
-.hello{font-size:13px;color:var(--mut)}
-.hello b{display:block;font-size:20px;color:var(--fg);font-weight:700;
- letter-spacing:-.02em;line-height:1.3}
-.topright{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.chip{background:var(--card);border:1px solid var(--line);border-radius:99px;
- padding:6px 13px;font-size:12.5px;color:var(--mut);box-shadow:var(--shadow)}
-.chip b{color:var(--fg)}
-.chip.live{background:var(--no-soft);border-color:#f7c9ca;color:#a8282c}
-.chip.dry{background:var(--warn-soft);border-color:#f3dcb4;color:#92610a}
-
-/* ---- cards ---- */
-.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
- padding:17px 19px;margin-bottom:16px;box-shadow:var(--shadow)}
-.chead{display:flex;align-items:center;justify-content:space-between;gap:12px;
- margin-bottom:13px;flex-wrap:wrap}
-h2{font-size:15px;margin:0;font-weight:650;letter-spacing:-.01em}
-.sub{font-size:12.5px;color:var(--mut);margin:0}
-.duo{display:grid;grid-template-columns:1.3fr 1fr;gap:16px;align-items:start}
-@media (max-width:980px){.duo{grid-template-columns:1fr}}
-.duo>.card{margin:0}
-
-/* ---- stat tiles: một dải gọn, không phải 6 ô to ---- */
-.strip{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:0;
- background:var(--card);border:1px solid var(--line);border-radius:var(--r);
- box-shadow:var(--shadow);margin-bottom:16px;overflow:hidden}
-@media (max-width:980px){.strip{grid-template-columns:repeat(3,minmax(0,1fr))}}
-@media (max-width:560px){.strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
-.cell{padding:13px 16px;border-right:1px solid var(--line);min-width:0}
-.cell:last-child{border-right:0}
-.cell .lab{font-size:11.5px;color:var(--mut);display:flex;align-items:center;gap:7px}
-.cell .lab i{width:7px;height:7px;border-radius:3px;display:inline-block;flex:none}
-.cell b{display:block;font-size:22px;font-weight:700;letter-spacing:-.02em;
- line-height:1.3}
-
-/* ---- biểu đồ: div thuần, không thư viện ---- */
-.bars{display:flex;align-items:flex-end;gap:6px;height:132px;margin-top:6px}
-.bcol{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;
- gap:5px;height:100%}
-.bstack{flex:1;display:flex;align-items:flex-end;justify-content:center;gap:3px;
- width:100%}
-.bstack i{display:block;width:9px;max-width:40%;border-radius:4px 4px 0 0;
- min-height:2px}
-.b1{background:var(--acc)} .b2{background:var(--warn)} .b3{background:var(--ok)}
-.bcol span{font-size:10.5px;color:var(--mut);white-space:nowrap}
-.bcol.now span{color:var(--fg);font-weight:600}
-/* ---- biểu đồ ngang: việc làm tay ---- */
-.hchart{margin:2px 0 14px}
-.hrow{display:flex;align-items:center;gap:12px;padding:5px 0}
-.hlab{width:92px;flex:none;font-size:13px;color:var(--mut)}
-.hbar{flex:1;height:9px;background:var(--bg);border-radius:99px;overflow:hidden}
-.hbar i{display:block;height:100%;border-radius:99px;min-width:0;
- transition:width .3s}
-.hnum{width:62px;flex:none;text-align:right;font-size:13px;font-weight:600}
-@media (max-width:560px){.hlab{width:70px}.hnum{width:54px}}
-.legend{display:flex;gap:16px;font-size:12px;color:var(--mut);flex-wrap:wrap}
-.legend i{width:9px;height:9px;border-radius:3px;display:inline-block;
- margin-right:6px}
-
-/* ---- manual item ---- */
-.item{border:1px solid var(--line);border-radius:13px;margin-bottom:10px;
- overflow:hidden;background:var(--card)}
-.ihead{display:flex;align-items:center;gap:11px;padding:12px 15px;cursor:pointer;
- user-select:none}
-.ihead:hover{background:var(--bg)}
-.ihead .who{font-weight:600;font-size:14.5px}
-.ihead .meta{font-size:12.5px;color:var(--mut)}
-.ihead .peek{flex:1;min-width:0;font-size:13px;color:var(--mut);
- white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.caret{color:var(--mut);font-size:12px;transition:transform .15s}
-.item.open .caret{transform:rotate(90deg)}
-.ibody{display:none;padding:2px 15px 15px;border-top:1px solid var(--line)}
-.item.open .ibody{display:block}
-.their{color:var(--mut);font-size:13.5px;border-left:3px solid var(--line);
- padding:3px 0 3px 12px;margin:13px 0;font-style:italic}
-.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:0 0 13px}
-@media (max-width:860px){.cols{grid-template-columns:1fr}}
-.col{min-width:0}
-.tag{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.06em;
- margin-bottom:6px;color:var(--mut);font-weight:600}
-.col.vi{border-left:2px solid var(--line);padding-left:14px;color:#475467}
-pre{white-space:pre-wrap;word-wrap:break-word;margin:0;font:inherit;font-size:14.5px}
-.dots{display:flex;gap:5px;margin-left:auto}
-.dot{width:7px;height:7px;border-radius:50%;background:var(--line)}
-.dot.on{background:var(--ok)}
-
-/* ---- buttons ---- */
-button,a.btn{font:inherit;font-size:13.5px;font-weight:550;border:1px solid var(--line);
- background:var(--card);color:var(--fg);border-radius:10px;padding:8px 14px;
- cursor:pointer;margin:0 7px 7px 0;text-decoration:none;display:inline-block}
-button:hover,a.btn:hover{background:var(--bg)}
-button:disabled{opacity:.55;cursor:default}
-.yes{background:var(--ok);border-color:var(--ok);color:#fff}
-.yes:hover{background:#0e8c45}
-.no{background:var(--card);border-color:#f3c9ca;color:var(--no)}
-.no:hover{background:var(--no-soft)}
-.pri{background:var(--acc);border-color:var(--acc);color:#fff}
-.pri:hover{background:#3f58e0}
-.ticked{background:var(--ok-soft);border-color:#b7e6cb;color:#0b7a3e}
-.danger{border:1px solid #f3c9ca;background:var(--no-soft);border-radius:13px;
- padding:14px 16px;margin-top:4px}
-
-/* ---- rows ---- */
-.row{display:flex;justify-content:space-between;gap:12px;padding:9px 0;
- border-bottom:1px solid var(--line);font-size:13.5px}
-.row:last-child{border:0}
-.row .l{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mut{color:var(--mut)}
-.bad{color:#f85149;font-weight:600}
-.pill{font-size:11px;padding:3px 9px;border-radius:99px;background:var(--acc-soft);
- color:var(--acc);font-weight:600;margin-right:8px}
-.pill.g{background:var(--ok-soft);color:var(--ok)}
-.empty{color:var(--mut);font-size:13.5px;padding:6px 0}
-.pay{display:grid;grid-template-columns:1fr 1fr;gap:20px}
-@media (max-width:700px){.pay{grid-template-columns:1fr;gap:14px}}
-.big{font-size:25px;font-weight:700;letter-spacing:-.02em;line-height:1.3;
- margin:1px 0 8px}
-.big .mut{font-size:15px;font-weight:600}
-.bar{height:7px;background:var(--bg);border-radius:99px;overflow:hidden;
- margin:0 0 7px}
-.bar i{display:block;height:100%;background:var(--acc);border-radius:99px;
- min-width:2px}
-.note{color:var(--warn);font-size:13px}
-img.shot{max-width:100%;border:1px solid var(--line);border-radius:11px;margin:0 0 12px}
-@media (max-width:820px){
- .shell{flex-direction:column}
- .side{width:auto;height:auto;position:static;flex-direction:row;overflow-x:auto;
-  align-items:center;padding:12px;gap:6px}
- .brand{padding:0 12px 0 4px}
- .navsep{margin:0}
- .sidefoot{display:none}
- .main{padding:18px 16px 48px}
-}
-</style></head><body>
-<div class="shell">
- <aside class="side">
-  <div class="brand"><i>X</i>XKols</div>
-  <a class="nav" id="nv-overview" onclick="go('overview')">Tổng quan</a>
-  <a class="nav" id="nv-manual" onclick="go('manual')">Việc làm tay<span class="n" id="n-manual"></span></a>
-  <a class="nav" id="nv-stats" onclick="go('stats')">Kết quả thật</a>
-  <a class="nav" id="nv-targets" onclick="go('targets')">Đối tượng reply</a>
-  <a class="nav" id="nv-pending" onclick="go('pending')">Chờ duyệt<span class="n" id="n-pending"></span></a>
-  <a class="nav" id="nv-posted" onclick="go('posted')">Đã đăng<span class="n" id="n-posted"></span></a>
-  <div class="navsep"></div>
-  <a class="nav" id="nv-ctl" onclick="go('ctl')">Điều khiển</a>
-  <div class="sidefoot"><b id="sf-handle">—</b><span id="sf-mode"></span></div>
- </aside>
- <main class="main">
-  <div class="top">
-   <div class="hello"><span id="crumb">Tổng quan</span><b id="hi">đang tải…</b></div>
-   <div class="topright" id="chips"></div>
-  </div>
-  <div id="app"></div>
- </main>
-</div>
-<script>
-let D = null;
-let VIEW = location.hash.slice(1) || 'overview';
-const OPEN = new Set();      // mục nào đang mở — giữ qua mỗi lần tự nạp lại
-const DRAFTS = {};
-const esc = s => (s||"").replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-const NAMES = {overview:'Tổng quan', manual:'Việc làm tay', stats:'Kết quả thật',
-               targets:'Đối tượng reply', pending:'Chờ duyệt',
-               posted:'Đã đăng', ctl:'Điều khiển'};
-
-function go(v){
-  VIEW = v; location.hash = v;
-  render();
-  window.scrollTo(0, 0);
-}
-function toggle_item(id){
-  if(OPEN.has(id)) OPEN.delete(id); else OPEN.add(id);
-  const el = document.getElementById('it_'+id);
-  if(el) el.classList.toggle('open');
-}
+JS = """/* ---------- nút gọi về app ---------- */
 async function act(id, d){
   await fetch('/api/decide?id='+id+'&d='+d, {method:'POST'}); load();
 }
@@ -368,34 +74,20 @@ async function stop(){
   const el = document.getElementById('ctl');
   if(el) el.textContent = 'Đã đặt cờ dừng — app thoát ở vòng kế tiếp.';
 }
-function copyTo(id){
-  navigator.clipboard.writeText(DRAFTS[id]||'').then(()=>{
-    const b = document.getElementById('cp_'+id);
-    if(b){ b.textContent='đã chép'; setTimeout(()=>b.textContent='Chép draft',1800); }
-  });
-}
-function cell(color, n, lab){
-  return '<div class="cell"><div class="lab"><i style="background:'+color+'"></i>'
-    + lab+'</div><b>'+n+'</b></div>';
-}
 
-/* ---------- biểu đồ ---------- */
-function bars(rows, pick, cls, fmt){
-  const vals = rows.map(pick);
-  const max = Math.max(1, ...vals.map(v=>Math.max(...v)));
-  return '<div class="bars">' + rows.map((r,i)=>{
-    const v = vals[i];
-    const last = i === rows.length-1;
-    return '<div class="bcol'+(last?' now':'')+'" title="'+r.date+' — '+fmt(r)+'">'
-      + '<div class="bstack">'
-      + v.map((x,j)=>'<i class="'+cls[j]+'" style="height:'
-          + (x/max*100).toFixed(1)+'%"></i>').join('')
-      + '</div><span>'+r.date.slice(8)+'</span></div>';
-  }).join('') + '</div>';
-}
-function legend(items){
-  return '<div class="legend">' + items.map(([c,t])=>
-    '<span><i style="background:'+c+'"></i>'+t+'</span>').join('') + '</div>';
+/* ---------- tiêu đề, chip, số đếm ---------- */
+function head(d){
+  return {
+    title: '@' + d.handle,
+    foot:  '@' + d.handle,
+    sub:   d.mode,
+    chips: '<span class="chip '+(d.mode.indexOf('THẬT')>=0?'live':'dry')+'">'
+             + esc(d.mode)+'</span>'
+         + '<span class="chip"><b>'+d.now+'</b> ICT · '
+         + (d.window ? 'cửa sổ '+esc(d.window) : 'ngoài cửa sổ')+'</span>',
+    badges: {manual: d.manual.length, pending: d.pending.length,
+             posted: d.posted.length},
+  };
 }
 
 /* ---------- các mục ---------- */
@@ -743,166 +435,42 @@ function v_ctl(d){
     + '<div class="danger"><button class="no" onclick="stop()">Dừng app</button>'
     + '<div class="sub">Việc làm tay và state theo ngày vẫn còn nguyên.</div>'
     + '</div></div>';
+}"""
+
+
+# --- mấy nút trên trang ------------------------------------------------------
+def _r_decide(q: dashkit.server.Query) -> dict:
+    pid = (q.get("id") or [""])[0]
+    d = (q.get("d") or [""])[0]
+    if d not in ("approved", "rejected"):
+        return {"ok": False, "why": "quyết định không hợp lệ"}
+    return {"ok": review.decide(pid, d)}
+
+
+def _r_review(q: dashkit.server.Query) -> dict:
+    on = (q.get("on") or ["0"])[0] == "1"
+    review.set_enabled(on)
+    return {"ok": True, "review": on}
+
+
+def _r_manual(q: dashkit.server.Query) -> dict:
+    pid = (q.get("id") or [""])[0]
+    act = (q.get("act") or [""])[0]
+    return {"ok": manual.mark(pid, act)}
+
+
+def _r_stop(_q: dashkit.server.Query) -> dict:
+    config.STOP_FILE.write_text("dung tu trang web\n", encoding="utf-8")
+    return {"ok": True}
+
+
+ROUTES = {
+    "/api/decide": _r_decide,
+    "/api/review": _r_review,
+    "/api/manual/refill": lambda _q: _kick_refill(),
+    "/api/manual": _r_manual,
+    "/api/stop": _r_stop,
 }
-
-const VIEWS = {overview:v_overview, manual:v_manual, stats:v_stats,
-               targets:v_targets, pending:v_pending, posted:v_posted,
-               ctl:v_ctl};
-
-function render(){
-  if(!D) return;
-  document.querySelectorAll('.nav').forEach(n=>n.classList.remove('on'));
-  const nv = document.getElementById('nv-'+VIEW);
-  if(nv) nv.classList.add('on');
-  document.getElementById('crumb').textContent = NAMES[VIEW] || '';
-  document.getElementById('app').innerHTML = (VIEWS[VIEW]||v_overview)(D);
-}
-
-async function load(){
-  let d;
-  try { d = await (await fetch('/api/state')).json(); }
-  catch(e){ document.getElementById('hi').textContent = 'Mất kết nối với app.'; return; }
-  D = d;
-
-  document.getElementById('hi').textContent = '@' + d.handle;
-  document.getElementById('sf-handle').textContent = '@' + d.handle;
-  document.getElementById('sf-mode').textContent = d.mode;
-  document.getElementById('chips').innerHTML =
-      '<span class="chip '+(d.mode.indexOf('THẬT')>=0?'live':'dry')+'">'+esc(d.mode)+'</span>'
-    + '<span class="chip"><b>'+d.now+'</b> ICT · '
-    + (d.window ? 'cửa sổ '+esc(d.window) : 'ngoài cửa sổ')+'</span>';
-  document.getElementById('n-manual').textContent = d.manual.length || '';
-  document.getElementById('n-pending').textContent = d.pending.length || '';
-  document.getElementById('n-posted').textContent = d.posted.length || '';
-  render();
-}
-window.addEventListener('hashchange', ()=>{
-  const v = location.hash.slice(1);
-  if(VIEWS[v] && v !== VIEW){ VIEW = v; render(); }
-});
-load(); setInterval(load, 4000);
-</script></body></html>"""
-
-
-class Server(ThreadingHTTPServer):
-    """HTTPServer mặc định bật SO_REUSEADDR. Trên Windows cờ đó cho hai tiến
-    trình bind CÙNG một cổng, không báo lỗi — chạy hai bản app là request đi lung
-    tung giữa hai bên (gặp ngày 14/11). Tắt đi để bản thứ hai chết dứt khoát."""
-    allow_reuse_address = False
-
-
-class Handler(BaseHTTPRequestHandler):
-    def log_message(self, *args):          # im lặng, đừng chen vào log app
-        pass
-
-    def _send(self, code: int, body: bytes, ctype: str) -> None:
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        # Không cache: sửa trang xong khởi động lại là thấy ngay, khỏi phải
-        # tự nạp lại trình duyệt (gặp ngày 14/11, tưởng code không ăn).
-        self.send_header("Cache-Control", "no-store, must-revalidate")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _json(self, data: dict, code: int = 200) -> None:
-        self._send(code, json.dumps(data, ensure_ascii=False).encode("utf-8"),
-                   "application/json; charset=utf-8")
-
-    def _serve_image(self, raw: str) -> None:
-        """Chỉ cho xem ảnh nằm trong posts/ — đừng mở cả ổ đĩa ra."""
-        try:
-            p = Path(unquote(raw)).resolve()
-            p.relative_to(config.POSTS.resolve())
-        except (ValueError, OSError):
-            return self._send(403, b"ngoai thu muc posts/", "text/plain")
-        if not p.is_file():
-            return self._send(404, b"khong thay anh", "text/plain")
-        ctype = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
-        self._send(200, p.read_bytes(), ctype)
-
-    def _authed(self) -> bool:
-        """Đã đăng nhập chưa — chỉ xét cookie, không nhận token trong URL."""
-        import hmac
-        for part in (self.headers.get("Cookie") or "").split(";"):
-            k, _, v = part.strip().partition("=")
-            if k == "xk":
-                return hmac.compare_digest(v, token())
-        return False
-
-    def _login_page(self, err: str = "", code: int = 200) -> None:
-        html = LOGIN.replace("__ERR__",
-                             f'<div class="err">{err}</div>' if err else "")
-        self._send(code, html.encode("utf-8"), "text/html; charset=utf-8")
-
-    def _deny(self) -> None:
-        """Trang thì đưa form đăng nhập, API thì 401 cho JS biết đường."""
-        if urlparse(self.path).path in ("/", "/login"):
-            return self._login_page()
-        self._send(401, b"can dang nhap", "text/plain; charset=utf-8")
-
-    def _do_login(self) -> None:
-        import hmac
-        left = _locked()
-        if left:
-            return self._login_page(
-                f"Sai nhiều lần — thử lại sau {left // 60 + 1} phút.", 429)
-        n = int(self.headers.get("Content-Length") or 0)
-        body = self.rfile.read(min(n, 4096)).decode("utf-8", "replace")
-        got = (parse_qs(body).get("p") or [""])[0]
-        if not (got and hmac.compare_digest(got, password())):
-            _note_fail()
-            return self._login_page("Sai mật khẩu.", 401)
-        _GUARD.update(fails=0, until=None)
-        self.send_response(303)
-        self.send_header("Location", "/")
-        self.send_header(
-            "Set-Cookie",
-            f"xk={token()}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000")
-        self.send_header("Content-Length", "0")
-        self.end_headers()
-
-    def do_GET(self):                      # noqa: N802
-        u = urlparse(self.path)
-        if not self._authed():
-            return self._deny()
-        if u.path in ("/", "/login"):
-            self._send(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
-        elif u.path == "/api/state":
-            self._json(_state_payload())
-        elif u.path == "/img":
-            self._serve_image((parse_qs(u.query).get("p") or [""])[0])
-        else:
-            self._send(404, b"not found", "text/plain")
-
-    def do_POST(self):                     # noqa: N802
-        u = urlparse(self.path)
-        if u.path == "/login":
-            return self._do_login()
-        if not self._authed():
-            return self._deny()
-        q = parse_qs(u.query)
-        if u.path == "/api/decide":
-            pid = (q.get("id") or [""])[0]
-            d = (q.get("d") or [""])[0]
-            if d not in ("approved", "rejected"):
-                return self._json({"ok": False, "why": "quyết định không hợp lệ"}, 400)
-            self._json({"ok": review.decide(pid, d)})
-        elif u.path == "/api/review":
-            on = (q.get("on") or ["0"])[0] == "1"
-            review.set_enabled(on)
-            self._json({"ok": True, "review": on})
-        elif u.path == "/api/manual/refill":
-            self._json(_kick_refill())
-        elif u.path == "/api/manual":
-            pid = (q.get("id") or [""])[0]
-            act = (q.get("act") or [""])[0]
-            self._json({"ok": manual.mark(pid, act)})
-        elif u.path == "/api/stop":
-            config.STOP_FILE.write_text("dung tu trang web\n", encoding="utf-8")
-            self._json({"ok": True})
-        else:
-            self._send(404, b"not found", "text/plain")
 
 
 _SETTINGS = None
@@ -1026,12 +594,13 @@ def _state_payload() -> dict:
         **snap,
     }
 
-
 def start(settings, port: int = DEFAULT_PORT) -> str:
     """Bật server trong thread nền. Trả URL."""
     global _SETTINGS
     _SETTINGS = settings
-    srv = Server((HOST, port), Handler)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    password()                      # sinh sẵn để in ra log khởi động
-    return f"http://{HOST}:{port}"
+    return dashkit.serve(dashkit.Dash(
+        name="XKols", icon="X", nav=NAV, app_js=JS,
+        state=_state_payload, gate=GATE, posts=ROUTES,
+        image_root=config.POSTS, home="overview",
+        host=HOST, port=port,
+    ))
