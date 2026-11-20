@@ -39,7 +39,8 @@ document.head.insertAdjacentHTML('beforeend', '<style>'
   + '.ov{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:14px;align-items:start}'
   + '.ov>.card{margin:0}'
   + '@media (max-width:980px){.ov{grid-template-columns:1fr}}'
-  + '.hc{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));gap:4px;align-items:end;height:190px;margin-top:6px}'
+  + '.hc{display:grid;gap:4px;align-items:end;height:190px;margin-top:6px}'
+  + '.hc.dn{gap:2px}.hc.dn .v{font-size:10.5px}.hc.dn .f{font-size:9.5px}.hc.dn .b{width:80%}'
   + '.hc .c{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;min-width:0}'
   + '.hc .v{font-size:12.5px;font-weight:700;line-height:1.1}'
   + '.hc .v.z{color:var(--mut);font-weight:400}'
@@ -47,7 +48,18 @@ document.head.insertAdjacentHTML('beforeend', '<style>'
   + '.hc .b{display:block;width:70%;max-width:30px;background:var(--acc);margin-top:3px;border-radius:5px 5px 0 0}'
   + '.hc .b.fb{background:var(--warn)}'
   + '.hc .b.fb + .b{margin-top:0;border-radius:0}'
-  + '.hx{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));gap:4px;border-top:1px solid var(--line);margin-top:4px;padding-top:5px;text-align:center;font-size:11px;line-height:1.35}'
+  + '.hx.dn{gap:2px;font-size:10px}.hx.dn b{font-size:10.5px}'
+  + '.hx.dn.er{margin-top:0;padding-top:3px;font-weight:700}.hx.dn.er:before{content:none}'
+  + '.hx.dn.dt{display:block;position:relative;height:18px;border-top:0;margin-top:0;padding-top:2px}'
+  + '.hx.dn.dt.bt{border-top:1px solid var(--line);padding-top:5px}'
+  + '.hx.dn.dt span{position:absolute;transform:translateX(-50%);white-space:nowrap}'
+  + '.rg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}'
+  + '.rg button{border:0;background:none;padding:5px 10px;font:inherit;font-size:12.5px;color:var(--mut);cursor:pointer}'
+  + '.rg button+button{border-left:1px solid var(--line)}.rg button.on{background:var(--acc);color:#fff}'
+  + '.rgd{display:flex;gap:6px;align-items:center;margin-top:8px;font-size:12.5px}'
+  + '.rgd input{padding:4px 6px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12.5px;background:none;color:inherit}'
+  + '.ctl{display:flex;flex-direction:column;align-items:flex-end;gap:6px}'
+  + '.hx{display:grid;gap:4px;border-top:1px solid var(--line);margin-top:4px;padding-top:5px;text-align:center;font-size:11px;line-height:1.35}'
   + '.hx b{display:block;font-size:11.5px}.hx .now b{color:var(--acc)}.hx .bad{font-weight:700}'
   + '.runs .r{display:grid;grid-template-columns:96px 70px minmax(0,1fr) auto;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line);font-size:13.5px;cursor:pointer}'
   + '.runs .r:last-child{border:0}.runs .det{padding:4px 0 10px 12px;font-size:12.5px;border-bottom:1px solid var(--line)}'
@@ -61,20 +73,96 @@ document.head.insertAdjacentHTML('beforeend', '<style>'
   + '@media (max-width:560px){.runs .r{grid-template-columns:1fr auto}.runs .r .pill,.runs .r .m{display:none}}'
   + '</style>');
 function agoTxt(m){ return m < 60 ? m+' phút' : Math.floor(m/60)+' giờ '+(m%60)+' phút'; }
-function hist14(his){
-  const max = Math.max(1, ...his.map(r=>r.comments+r.friends));
-  const H = 140;
-  const top = '<div class="hc">' + his.map(r=>
-    '<div class="c" title="'+r.date+': '+r.comments+' comment, '+r.friends+' lời mời, '+r.runs+' lượt'+(r.errors?', '+r.errors+' lỗi':'')+'">'
-      + '<span class="f">'+(r.friends?'+'+r.friends+' mời':'')+'</span>'
+/* ---------- biểu đồ theo khoảng thời gian ---------- */
+const RGS = [['14','14 ngày'],['30','1 tháng'],['90','3 tháng'],['365','1 năm'],['c','Khoảng']];
+const ls = (k,v) => { try { if(v===undefined) return localStorage.getItem(k); localStorage.setItem(k,v); } catch(e){ return null; } };
+let RG = ls('fb_rg') || '14', RF = ls('fb_rf') || '', RT = ls('fb_rt') || '';
+/* đang chọn ngày thì không vẽ lại, kẻo đóng mất bảng chọn ngày */
+function HOLD(){ const a = document.activeElement; return !!(a && (a.id==='rg_f' || a.id==='rg_t')); }
+function setRg(k){ RG = k; ls('fb_rg', k); render(); }
+function setRd(){
+  RF = document.getElementById('rg_f').value; RT = document.getElementById('rg_t').value;
+  ls('fb_rf', RF); ls('fb_rt', RT); document.activeElement.blur(); render();
+}
+const dmy = s => s.slice(8)+'/'+s.slice(5,7);
+const addD = (s,n) => { const t = new Date(s+'T00:00:00'); t.setDate(t.getDate()+n);
+  return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0'); };
+function pick(d){
+  /* trả về các cột đã gộp: theo ngày (≤31 ngày), theo tuần (≤120 ngày), theo tháng (dài hơn) */
+  const all = d.daily, last = all[all.length-1][0];
+  let from, to = last;
+  if(RG==='c'){
+    from = RF || addD(last,-29); to = RT && RT < last ? RT : last;
+    if(from > to){ const x = from; from = to; to = x; }
+  } else from = addD(last, -(+RG-1));
+  const rows = all.filter(r=>r[0]>=from && r[0]<=to);
+  const n = rows.length;
+  const unit = n <= 31 ? 'day' : n <= 120 ? 'week' : 'month';
+  const key = r => {
+    if(unit==='day') return r[0];
+    if(unit==='month') return r[0].slice(0,7);
+    const t = new Date(r[0]+'T00:00:00'); return addD(r[0], -((t.getDay()+6)%7)); /* thứ Hai đầu tuần */
+  };
+  const m = new Map();
+  rows.forEach(r=>{
+    const k = key(r);
+    const b = m.get(k) || {k, first:r[0], lastd:r[0], comments:0, friends:0, runs:0, errors:0, cost:0};
+    b.lastd = r[0]; b.comments += r[1]; b.friends += r[2]; b.runs += r[3]; b.errors += r[4]; b.cost += r[5];
+    m.set(k, b);
+  });
+  const items = [...m.values()];
+  items.forEach(b=>{
+    b.lab = unit==='day' ? dmy(b.k) : unit==='week' ? dmy(b.first) : b.k.slice(5)+'/'+b.k.slice(2,4);
+    b.tip = unit==='day' ? b.k : dmy(b.first)+'–'+dmy(b.lastd)+'/'+b.lastd.slice(0,4);
+    b.now = b.lastd === last;
+  });
+  return {from, to, n, unit, items};
+}
+function bars(items, unit){
+  const N = items.length, dense = N > 16;
+  const max = Math.max(1, ...items.map(r=>r.comments+r.friends));
+  const H = 140, cols = 'grid-template-columns:repeat('+N+',minmax(0,1fr))';
+  const top = '<div class="hc'+(dense?' dn':'')+'" style="'+cols+'">' + items.map(r=>
+    '<div class="c" title="'+r.tip+': '+r.comments+' comment, '+r.friends+' lời mời, '+r.runs+' lượt'+(r.errors?', '+r.errors+' lỗi':'')+'">'
+      + '<span class="f">'+(r.friends?'+'+r.friends+(dense?'':' mời'):'')+'</span>'
       + '<span class="v'+(r.comments?'':' z')+'">'+r.comments+'</span>'
       + (r.friends ? '<i class="b fb" style="height:'+(r.friends/max*H).toFixed(1)+'px"></i>' : '')
       + '<i class="b" style="height:'+(r.comments ? Math.max(2, r.comments/max*H) : 0).toFixed(1)+'px"></i>'
       + '</div>').join('') + '</div>';
-  const axis = '<div class="hx">' + his.map((r,i)=>'<span'+(i===his.length-1?' class="now"':'')+'><b>'+r.date.slice(8)+'/'+r.date.slice(5,7)+'</b>'
-    + '<span class="mut">'+(r.runs?r.runs+' lượt':'—')+'</span>'
-    + (r.errors?'<br><span class="bad">'+r.errors+' lỗi</span>':'')+'</span>').join('') + '</div>';
-  return top + axis;
+  /* nhiều cột thì nhãn ngày thưa ra cho đỡ chồng chữ */
+  const step = N > 24 ? Math.ceil(N/12) : 1;
+  if(!dense){
+    return top + '<div class="hx" style="'+cols+'">' + items.map(r=>'<span'+(r.now?' class="now"':'')+'><b>'+r.lab+'</b>'
+      + '<span class="mut">'+(r.runs?r.runs+' lượt':'—')+'</span>'
+      + (r.errors?'<br><span class="bad">'+r.errors+' lỗi</span>':'')+'</span>').join('') + '</div>';
+  }
+  /* nhiều cột: hàng lỗi riêng, hàng ngày thưa ra cho đỡ chồng chữ */
+  const errs = items.some(r=>r.errors) ? '<div class="hx dn er" style="'+cols+'">'
+    + items.map(r=>'<span class="bad">'+(r.errors||'')+'</span>').join('') + '</div>' : '';
+  const dates = '<div class="hx dn dt'+(errs?'':' bt')+'">' + items.map((r,i)=> (N-1-i) % step === 0
+    ? '<span'+(r.now?' class="now"':'')+' style="left:'+((i+.5)/N*100).toFixed(2)+'%"><b>'+r.lab+'</b></span>' : '').join('') + '</div>';
+  return top + errs + dates;
+}
+function rgBar(d){
+  let h = '<div class="rg">' + RGS.map(([k,t])=>'<button class="'+(RG===k?'on':'')+'" onclick="setRg(\''+k+'\')">'+t+'</button>').join('') + '</div>';
+  if(RG==='c'){
+    const last = d.daily[d.daily.length-1][0], first = d.daily[0][0];
+    h += '<div class="rgd"><input type="date" id="rg_f" min="'+first+'" max="'+last+'" value="'+(RF||addD(last,-29))+'" onchange="setRd()">'
+      + '<span class="mut">đến</span><input type="date" id="rg_t" min="'+first+'" max="'+last+'" value="'+(RT||last)+'" onchange="setRd()"></div>';
+  }
+  return h;
+}
+function nextTxt(d){
+  if(d.lock) return '<span class="bad">không chạy (bot đang khóa)</span>';
+  const N = d.next_run;
+  if(!N) return '<span class="mut">không đọc được lịch</span>';
+  if(N.state==='Disabled') return '<span class="bad">tác vụ đang tắt</span>';
+  if(N.state==='Running' || d.chrome_open) return '<b class="ok">đang chạy</b>';
+  if(!N.at) return '<span class="mut">chưa có lịch</span>';
+  const t = new Date(N.at.replace(' ','T')), m = Math.round((t - Date.now())/60000);
+  const day = N.at.slice(0,10) === d.today ? '' : dmy(N.at.slice(0,10))+' ';
+  const full = d.c_today >= d.limits.comments ? '<br><span class="mut">đã đủ '+d.limits.comments+' comment hôm nay</span>' : '';
+  return day+esc(N.at.slice(11))+(m>0?' · còn '+agoTxt(m):'')+'<br><span class="mut">bot tự lệch thêm 0–5 phút</span>'+full;
 }
 function v_overview(d){
   const L = d.limits;
@@ -92,18 +180,23 @@ function v_overview(d){
     + cell('var(--mut)', d.groups.filter(g=>!g.paused).length+' / '+d.groups.length, 'group đang chạy')
     + cell('var(--mut)', d.posts_total, 'bài đã comment')
     + '</div>';
-  const his = d.hist;
+  const P = pick(d), his = P.items;
   const sum = f => his.reduce((a,r)=>a+f(r),0);
   const hr = new Date().getHours();
   const late = d.last_run && d.ago_min > 180 && hr >= 9 && hr <= 22;
-  h += '<div class="ov"><div class="card"><div class="chead"><div><h2>14 ngày qua</h2>'
+  const by = {day:'', week:' · mỗi cột 1 tuần', month:' · mỗi cột 1 tháng'}[P.unit];
+  const title = RG==='c' ? dmy(P.from)+'/'+P.from.slice(0,4)+' – '+dmy(P.to)+'/'+P.to.slice(0,4)
+    : {'14':'14 ngày qua','30':'1 tháng qua','90':'3 tháng qua','365':'1 năm qua'}[RG];
+  h += '<div class="ov"><div class="card"><div class="chead"><div><h2>'+title+'</h2>'
     + '<p class="sub">'+sum(r=>r.comments)+' comment · '+sum(r=>r.friends)+' lời mời · '
-    + sum(r=>r.runs)+' lượt · ~$'+sum(r=>r.cost).toFixed(3)+' (không tính chạy thử)</p></div>'
-    + legend([['var(--acc)','comment'],['var(--warn)','lời mời']])+'</div>'
-    + hist14(his) + '</div>';
+    + sum(r=>r.runs)+' lượt · ~$'+sum(r=>r.cost).toFixed(3)+' (không tính chạy thử)'+by
+    + (P.from < d.first_date ? ' · có dữ liệu từ '+dmy(d.first_date) : '')+'</p></div>'
+    + '<div class="ctl">'+rgBar(d)+legend([['var(--acc)','comment'],['var(--warn)','lời mời'],['var(--no)','số đỏ: lỗi']])+'</div></div>'
+    + bars(his, P.unit) + '</div>';
   h += '<div class="card"><div class="chead"><h2>Trạng thái</h2></div><div class="kv">'
     + '<span>Lượt gần nhất</span><span class="'+(late?'bad':'')+'">'
     + (d.last_run ? esc(d.last_run.slice(11))+' · '+agoTxt(d.ago_min)+' trước'+(late?' (lâu bất thường)':'') : 'chưa có')+'</span>'
+    + '<span>Lượt kế tiếp</span><span>'+nextTxt(d)+'</span>'
     + '<span>Chrome bot</span><span>'+(d.chrome_open?'<b class="ok">đang mở</b>':'tắt')+'</span>'
     + '<span>Group kế</span><span>'+(d.next_groups.map(esc).join('<br>')||'-')+'</span>'
     + '<span>Câu kế</span><span>'+esc(d.phrase_next)+'</span>'

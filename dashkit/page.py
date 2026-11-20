@@ -292,6 +292,8 @@ function legend(items){
 
 function render(){
   if(!D) return;
+  /* app co the giu nguyen man hinh (vd dang chon ngay) bang ham HOLD() */
+  if(typeof HOLD === 'function' && HOLD()) return;
   document.querySelectorAll('.nav').forEach(n=>n.classList.remove('on'));
   const nv = document.getElementById('nv-'+VIEW);
   if(nv) nv.classList.add('on');

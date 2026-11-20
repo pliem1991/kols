@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -76,6 +78,32 @@ def chrome_open() -> bool:
             return False
     except OSError:
         return True
+
+
+TASK = "TT cheo bot"
+_NEXT: dict = {"t": 0.0, "v": None}
+
+
+def next_run() -> dict | None:
+    """Giờ chạy kế của tác vụ Windows chạy bot (bot tự lệch thêm 0-5 phút). Cache 60 giây."""
+    if time.time() - _NEXT["t"] < 60:
+        return _NEXT["v"]
+    v = None
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             f"$t=Get-ScheduledTask -TaskName '{TASK}' -ErrorAction Stop;"
+             f"$i=$t|Get-ScheduledTaskInfo;"
+             "\"$($t.State)|$(if($i.NextRunTime){$i.NextRunTime.ToString('yyyy-MM-dd HH:mm')})\""],
+            capture_output=True, text=True, timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        state, _, at = out.stdout.strip().partition("|")
+        if state:
+            v = {"state": state, "at": at or None}
+    except Exception:  # noqa: BLE001
+        v = None
+    _NEXT.update(t=time.time(), v=v)
+    return v
 
 
 def parse_log() -> list[dict]:
@@ -176,10 +204,16 @@ def state() -> dict:
         if x.get("date"):
             by[x["date"]]["friends"] += 1
     by[today]["comments"] = c_today
-    hist = []
-    for i in range(13, -1, -1):
+    # theo ngày cho biểu đồ: ít nhất 1 năm, xa hơn nếu dữ liệu cũ hơn
+    first = min([k for k, b in by.items() if b["runs"] or b["friends"] or b["comments"]] or [today])
+    start = min(datetime.strptime(first, "%Y-%m-%d"), now - timedelta(days=365))
+    daily_s = []
+    for i in range((now.date() - start.date()).days, -1, -1):
         d = (now - timedelta(days=i)).strftime("%Y-%m-%d")
-        hist.append({"date": d, **by[d], "cost": round(by[d]["cost"], 4)})
+        b = by[d]
+        daily_s.append([d, b["comments"], b["friends"], b["runs"], b["errors"], round(b["cost"], 4)])
+    hist = [{"date": r[0], "comments": r[1], "friends": r[2], "runs": r[3], "errors": r[4], "cost": r[5]}
+            for r in daily_s[-14:]]
 
     lock = None
     if (CHEO / "dung-khan-cap.txt").exists():
@@ -225,6 +259,9 @@ def state() -> dict:
         "cost_today": round(sum(r["cost"] for r in runs if r["date"] == today), 4),
         "costs": costs(runs, now),
         "hist": hist,
+        "daily": daily_s,  # [ngày, comment, lời mời, lượt, lỗi, tiền]
+        "first_date": first,
+        "next_run": next_run(),
         "runs": list(reversed(runs[-30:])),
         "last_run": last["at"] if last else None, "ago_min": ago_min,
         "errors": errors[:40],
