@@ -94,12 +94,14 @@ def next_run() -> dict | None:
             ["powershell", "-NoProfile", "-Command",
              f"$t=Get-ScheduledTask -TaskName '{TASK}' -ErrorAction Stop;"
              f"$i=$t|Get-ScheduledTaskInfo;"
-             "\"$($t.State)|$(if($i.NextRunTime){$i.NextRunTime.ToString('yyyy-MM-dd HH:mm')})\""],
+             "$tr=($t.Triggers|?{$_.Enabled -and $_.StartBoundary}|%{([datetime]$_.StartBoundary).ToString('HH:mm')}) -join ',';"
+             "\"$($t.State)|$(if($i.NextRunTime){$i.NextRunTime.ToString('yyyy-MM-dd HH:mm')})|$tr\""],
             capture_output=True, text=True, timeout=15,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        state, _, at = out.stdout.strip().partition("|")
+        state, at, tr = (out.stdout.strip().split("|") + ["", ""])[:3]
         if state:
-            v = {"state": state, "at": at or None}
+            v = {"state": state, "at": at or None,
+                 "slots": sorted({s for s in tr.split(",") if re.fullmatch(r"\d{2}:\d{2}", s)})}
     except Exception:  # noqa: BLE001
         v = None
     _NEXT.update(t=time.time(), v=v)
@@ -150,6 +152,47 @@ def parse_log() -> list[dict]:
         })
     runs.sort(key=lambda r: r["at"])
     return runs
+
+
+def schedule_today(nr: dict | None, runs: list[dict], now: datetime, busy: bool) -> list[dict]:
+    """Các giờ chạy trong ngày và lượt nào đã chạy xong.
+
+    Log ghi lúc lượt chạy xong (thường 10–30 phút sau giờ hẹn), nên mỗi lượt thật hôm nay
+    được gán cho giờ hẹn gần nhất trước nó. Lượt chạy thử (dry) không tính.
+    """
+    slots = (nr or {}).get("slots") or []
+    if not slots:
+        return []
+    today = now.strftime("%Y-%m-%d")
+    hhmm = now.strftime("%H:%M")
+    done: dict[str, list[dict]] = defaultdict(list)
+    for r in runs:
+        if r["date"] != today or r["kind"] == "dry":
+            continue
+        t = r["at"][11:]
+        before = [s for s in slots if s <= t]
+        if before:
+            done[before[-1]].append(r)
+    out = []
+    for i, s in enumerate(slots):
+        nxt = slots[i + 1] if i + 1 < len(slots) else "24:00"
+        rs = done.get(s, [])
+        if rs:
+            st = "done"
+        elif s > hhmm:
+            st = "pending"
+        elif busy and hhmm < nxt:
+            st = "running"
+        elif hhmm < nxt and (now - datetime.strptime(today + " " + s, "%Y-%m-%d %H:%M")).total_seconds() < 3600:
+            st = "wait"  # mới qua giờ hẹn chưa tới 1 tiếng, chưa có log (bot lệch giờ hoặc đang khởi động)
+        else:
+            st = "missed"
+        out.append({"at": s, "status": st,
+                    "ran": rs[-1]["at"][11:] if rs else None,
+                    "comments": sum(r["comments"] for r in rs),
+                    "friends": sum(r["friends"] for r in rs),
+                    "errors": sum(len(r["errors"]) for r in rs)})
+    return out
 
 
 def costs(runs: list[dict], now: datetime) -> dict:
@@ -247,13 +290,17 @@ def state() -> dict:
             errors.append({"at": r["at"], "kind": r["kind"], "text": e})
     errors.reverse()
 
+    nr = next_run()
+    copen = chrome_open()
+    busy = copen or bool(nr and nr.get("state") == "Running")
+
     return {
         "now": now.strftime("%H:%M %d/%m"),
         "today": today,
         "model": model(),
         "limits": lim,
         "lock": lock,
-        "chrome_open": chrome_open(),
+        "chrome_open": copen,
         "c_today": c_today, "f_today": f_today,
         "errors_today": sum(1 for e in errors if e["at"].startswith(today)),
         "cost_today": round(sum(r["cost"] for r in runs if r["date"] == today), 4),
@@ -261,7 +308,8 @@ def state() -> dict:
         "hist": hist,
         "daily": daily_s,  # [ngày, comment, lời mời, lượt, lỗi, tiền]
         "first_date": first,
-        "next_run": next_run(),
+        "next_run": nr,
+        "schedule": schedule_today(nr, runs, now, busy),
         "runs": list(reversed(runs[-30:])),
         "last_run": last["at"] if last else None, "ago_min": ago_min,
         "errors": errors[:40],

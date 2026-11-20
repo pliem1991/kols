@@ -70,6 +70,14 @@ document.head.insertAdjacentHTML('beforeend', '<style>'
   + '.tb th:first-child,.tb td:first-child{text-align:left}'
   + '.tb tr.sum td{border-bottom:0;font-weight:600}'
   + '.pill{font-size:11px;padding:2px 7px;border-radius:9px;background:var(--line);color:var(--mut);text-align:center}'
+  + '.sch{display:grid;grid-template-columns:repeat(auto-fill,minmax(62px,1fr));gap:6px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}'
+  + '.sch h3{grid-column:1/-1;margin:0 0 2px;font-size:12.5px;font-weight:600;color:var(--mut)}'
+  + '.sch .s{border:1px solid var(--line);border-radius:8px;padding:5px 4px;text-align:center;line-height:1.25}'
+  + '.sch .s b{display:block;font-size:13.5px}.sch .s small{display:block;font-size:10.5px;color:var(--mut);white-space:nowrap}'
+  + '.sch .s.done{background:var(--line);opacity:.55}.sch .s.done b{font-weight:500}'
+  + '.sch .s.missed{opacity:.55;border-style:dashed}'
+  + '.sch .s.next{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc) inset}.sch .s.next b{color:var(--acc)}'
+  + '.sch .s.running{border-color:var(--ok);box-shadow:0 0 0 1px var(--ok) inset}.sch .s.running b{color:var(--ok)}'
   + '@media (max-width:560px){.runs .r{grid-template-columns:1fr auto}.runs .r .pill,.runs .r .m{display:none}}'
   + '</style>');
 function agoTxt(m){ return m < 60 ? m+' phút' : Math.floor(m/60)+' giờ '+(m%60)+' phút'; }
@@ -164,6 +172,22 @@ function nextTxt(d){
   const full = d.c_today >= d.limits.comments ? '<br><span class="mut">đã đủ '+d.limits.comments+' comment hôm nay</span>' : '';
   return day+esc(N.at.slice(11))+(m>0?' · còn '+agoTxt(m):'')+'<br><span class="mut">bot tự lệch thêm 0–5 phút</span>'+full;
 }
+function schedTxt(d){
+  const S = d.schedule || [];
+  if(!S.length) return '';
+  const nx = S.find(s=>s.status==='pending');
+  return '<div class="sch"><h3>Lịch chạy hôm nay</h3>' + S.map(s=>{
+    let cls = s.status, sub;
+    if(s.status==='done') sub = '✓ '+s.comments+' cmt'+(s.errors?'</small><small class="bad">'+s.errors+' lỗi':'');
+    else if(s.status==='running') sub = 'đang chạy';
+    else if(s.status==='wait') sub = 'chưa xong';
+    else if(s.status==='missed') sub = 'không chạy';
+    else { sub = s===nx ? 'kế tiếp' : '&nbsp;'; if(s===nx) cls += ' next'; }
+    const tip = s.status==='done' ? 'Hẹn '+s.at+', xong lúc '+s.ran+': '+s.comments+' comment, '+s.friends+' lời mời'+(s.errors?', '+s.errors+' lỗi':'')
+      : s.status==='missed' ? 'Qua giờ hẹn mà không có log lượt chạy' : 'Hẹn '+s.at+' (bot tự lệch thêm 0–5 phút)';
+    return '<div class="s '+cls+'" title="'+esc(tip)+'"><b>'+s.at+'</b><small>'+sub+'</small></div>';
+  }).join('') + '</div>';
+}
 function v_overview(d){
   const L = d.limits;
   let h = '';
@@ -202,7 +226,7 @@ function v_overview(d){
     + '<span>Câu kế</span><span>'+esc(d.phrase_next)+'</span>'
     + '<span>Mỗi lượt</span><span>'+L.run_min+'–'+L.run_max+' comment · '+L.groups_per_run+' group</span>'
     + '<span>Kết bạn</span><span>≥'+L.mutual+' bạn chung<br>11–14h tối đa 2 · 19–22h đủ '+L.friends+'</span>'
-    + '</div></div></div>';
+    + '</div>'+schedTxt(d)+'</div></div>';
   return h;
 }
 function tk(n){ return n>=1e6 ? (n/1e6).toFixed(2)+'M' : n>=1e3 ? Math.round(n/1e3)+'K' : String(n||0); }
