@@ -97,6 +97,17 @@ check("trang dang nhap doi ten theo app",
       "<h1>TestKit</h1>" in dashkit.login("TestKit"))
 check("bao loi hien ra o trang dang nhap",
       "Sai mat khau." in dashkit.login("TestKit", "Sai mat khau."))
+html2 = dashkit.build("TestKit", "T", nav, JS, links=[("Ben kia", "http://127.0.0.1:9999")])
+check("nut sang trang khac co link", 'href="http://127.0.0.1:9999"' in html2 and "Ben kia" in html2)
+check("khong truyen links thi khong co nut", 'class="nav jump"' not in html)
+import json as _json, tempfile as _tf
+_lf = Path(_tf.mkdtemp()) / "links.json"
+_lf.write_text(_json.dumps([{"name": "A", "url": "http://127.0.0.1:8787"},
+                            {"name": "B", "url": "http://127.0.0.1:8788"},
+                            {"name": "xau", "url": "javascript:alert(1)"}]), encoding="utf-8")
+check("links.json bo trang cung cong va url xau",
+      dashkit.shared_links(8787, _lf) == [("B", "http://127.0.0.1:8788")])
+check("links.json khong co thi rong", dashkit.shared_links(8787, _lf.with_name("khong.json")) == [])
 try:
     dashkit.build("X", "X", [], JS)
     check("nav rong phai bao loi", False)

@@ -20,7 +20,7 @@ Cách dùng, xem dashkit/README.md. Bộ xương:
 """
 from .gate import Gate
 from .page import CSS, Nav, build, login, nav_html
-from .server import Dash, Server, handler_for, serve
+from .server import Dash, Server, handler_for, serve, shared_links
 
 __all__ = ["CSS", "Dash", "Gate", "Nav", "Server", "build", "handler_for",
-           "login", "nav_html", "serve"]
+           "login", "nav_html", "serve", "shared_links"]

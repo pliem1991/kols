@@ -81,6 +81,7 @@ a{color:var(--acc)}
 .nav:hover{background:var(--bg)}
 .nav.on{background:var(--acc);color:#fff}
 .nav .n{float:right;font-size:12px;opacity:.8}
+.nav.jump{border:1px dashed var(--line);margin-top:8px;text-decoration:none}
 .navsep{margin-top:auto}
 .sidefoot{border-top:1px solid var(--line);padding-top:14px;margin-top:14px;
  font-size:12.5px;color:var(--mut)}
@@ -343,13 +344,22 @@ def nav_html(items: list[Nav]) -> str:
     return "\n".join(out)
 
 
+def links_html(links: list[tuple[str, str]]) -> str:
+    """Nut sang trang theo doi khac (moi trang mot server, mot cong rieng)."""
+    esc = lambda t: (str(t).replace("&", "&amp;").replace("<", "&lt;")
+                     .replace(">", "&gt;").replace('"', "&quot;"))
+    return "\n".join(f'  <a class="nav jump" href="{esc(u)}" title="Sang trang {esc(n)}">'
+                     f'&#8644; {esc(n)}</a>' for n, u in links)
+
+
 def login(name: str, err: str = "") -> str:
     return (LOGIN.replace("__NAME__", name)
             .replace("__ERR__", f'<div class="err">{err}</div>' if err else ""))
 
 
 def build(name: str, icon: str, nav: list[Nav], app_js: str,
-          home: str = "", poll_ms: int = 4000) -> str:
+          home: str = "", poll_ms: int = 4000,
+          links: list[tuple[str, str]] | None = None) -> str:
     """Ghep trang day du. app_js la JS rieng cua app, dat giua khung va khoi dong."""
     if not nav:
         raise ValueError("can it nhat mot muc nav")
@@ -357,7 +367,8 @@ def build(name: str, icon: str, nav: list[Nav], app_js: str,
     names = {n.key: n.label for n in nav}
     page = (CSS.replace("__NAME__", name)
             + SHELL.replace("__ICON__", icon).replace("__NAME__", name)
-                   .replace("__NAV__", nav_html(nav))
+                   .replace("__NAV__", nav_html(nav)
+                            + ("\n" + links_html(links) if links else ""))
             + JS_CORE.replace("__HOME__", home)
                      .replace("__NAMES__", json.dumps(names, ensure_ascii=False))
             + app_js

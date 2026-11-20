@@ -36,10 +36,34 @@ class Dash:
     poll_ms: int = 4000
     host: str = "127.0.0.1"
     port: int = 8787
+    # Nut sang trang khac: [(ten, url)]. None = doc dashkit/links.json (dung
+    # chung cho moi app, tu bo trang co cung cong voi minh). [] = khong co nut.
+    links: list[tuple[str, str]] | None = None
 
     def html(self) -> str:
+        links = self.links if self.links is not None else shared_links(self.port)
         return build(self.name, self.icon, self.nav, self.app_js,
-                     home=self.home, poll_ms=self.poll_ms)
+                     home=self.home, poll_ms=self.poll_ms, links=links)
+
+
+LINKS_FILE = Path(__file__).resolve().parent / "links.json"
+
+
+def shared_links(own_port: int, path: Path | None = None) -> list[tuple[str, str]]:
+    """Doc lai moi lan dung trang nen sua file khong can khoi dong lai."""
+    try:
+        rows = json.loads((path or LINKS_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    out = []
+    for r in rows if isinstance(rows, list) else []:
+        name, url = str(r.get("name", "")), str(r.get("url", ""))
+        if not name or not url.startswith(("http://", "https://")):
+            continue
+        if urlparse(url).port == own_port:
+            continue
+        out.append((name, url))
+    return out
 
 
 class Server(ThreadingHTTPServer):
