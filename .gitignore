@@ -32,3 +32,6 @@ STOP
 # Temp
 *.tmp
 *.bak
+
+# Trang theo dõi Facebook (fb/): mật khẩu nằm ở fb/fb.env (đã chặn bởi *.env), số nhập tay
+fb/data/
