@@ -35,3 +35,5 @@ STOP
 
 # Trang theo dõi Facebook (fb/): mật khẩu nằm ở fb/fb.env (đã chặn bởi *.env), số nhập tay
 fb/data/
+viral/.last_scan
+viral/quet.log

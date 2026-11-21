@@ -617,6 +617,20 @@ async def loop(s, once: bool = False) -> None:
             log("thấy file STOP -> dừng")
             return
 
+        # Quét video viral trên X cho trang Facebook agaubun (cổng 8788).
+        # Không dính gì tới việc đăng của @macropandaX: chỉ đọc, qua acc phụ
+        # twscrape, rồi ghi ra viral/videos.json. Đặt ở đây vì chủ dự án chốt
+        # 21/11 cho chạy trong vòng lặp bot thay vì Task Scheduler của Windows.
+        # Lỗi thì bỏ qua — mất một lượt quét không đáng để chết cả bot X.
+        try:
+            from viral import scan as viral_scan
+            if viral_scan.due():
+                r = await viral_scan.run()
+                log(f"video viral: thêm {r['them']} mới, cập nhật "
+                    f"{r['capnhat']} cũ -> {viral_scan.store.FILE}")
+        except Exception as e:
+            log(f"quét video viral lỗi, bỏ lượt này: {type(e).__name__}: {e}")
+
         st = state.load()
         try:
             what = await tick(s, st)

@@ -258,6 +258,38 @@ def describe(rows: list[dict]) -> None:
                 rows[i]["topic"] = tp
 
 
+# --- lịch -------------------------------------------------------------------
+# Hai lượt mỗi ngày, cách xa nhau để "seen" đo được đà tăng. Chủ dự án chốt
+# 21/11 cho chạy ngay trong vòng lặp bot XKols thay vì Task Scheduler của
+# Windows.
+HOURS = (9, 20)
+MARK = ROOT / "viral" / ".last_scan"
+
+
+def due(now: datetime | None = None) -> bool:
+    """Đã qua giờ quét mà hôm nay chưa quét khung đó chưa?
+
+    Ghi mốc ra file chứ không giữ trong bộ nhớ: bot khởi động lại vài lần một
+    ngày là chuyện thường, giữ trong bộ nhớ thì mỗi lần bật lại quét thêm một
+    lượt thừa.
+    """
+    now = now or datetime.now()
+    slot = max([h for h in HOURS if now.hour >= h], default=None)
+    if slot is None:
+        return False
+    tag = f"{now:%Y-%m-%d}-{slot:02d}"
+    try:
+        return MARK.read_text(encoding="utf-8").strip() != tag
+    except OSError:
+        return True
+
+
+def mark_done(now: datetime | None = None) -> None:
+    now = now or datetime.now()
+    slot = max([h for h in HOURS if now.hour >= h], default=HOURS[0])
+    MARK.write_text(f"{now:%Y-%m-%d}-{slot:02d}", encoding="utf-8")
+
+
 async def run(per_run: int = PER_RUN) -> dict:
     """Một lượt quét đầy đủ. Trả số liệu để in ra log."""
     found, notes = await fetch()
@@ -283,6 +315,7 @@ async def run(per_run: int = PER_RUN) -> dict:
     # Bài đã có trong file vẫn ghi lại số liệu -> lần sau đo được tốc độ tăng.
     again = [r for r in found if r["url"] in known]
     res = store.merge(fresh + again)
+    mark_done()
     return {**res, "quet_duoc": len(found), "ghi_chu": notes}
 
 

@@ -68,12 +68,19 @@ Lọc theo chủ đề và trạng thái, bấm nút đổi trạng thái là gh
 
 ## Chạy định kỳ
 
-Chưa đặt lịch tự động. Đề xuất 2 lượt/ngày, cách xa nhau để `seen` đo được đà
-tăng — ví dụ 09:00 và 20:00:
+Nằm trong vòng lặp của bot XKols (`app/runner.py`), **không** dùng Task
+Scheduler của Windows và **không** dùng scheduler của Claude. Hai lượt mỗi
+ngày, 09:00 và 20:00 — đổi ở `scan.HOURS`.
 
-```
-schtasks /create /tn "XKols quet video viral" /tr "D:\AI\XKols\.venv\Scripts\python.exe -m viral" /sc daily /st 09:00
-```
+Mốc lượt cuối ghi ra `viral/.last_scan` chứ không giữ trong bộ nhớ: bot khởi
+động lại vài lần một ngày là chuyện thường, giữ trong bộ nhớ thì mỗi lần bật
+lại quét thêm một lượt thừa.
+
+Bot tắt thì không có lượt quét nào. Đó là cái giá của việc bỏ Task Scheduler:
+đổi lấy chỗ một chỗ duy nhất để bật tắt và một dòng log chung.
+
+Chạy tay một lượt bất cứ lúc nào vẫn được bằng `python -m viral` — nó không
+xét giờ, quét ngay.
 
 Chạy quá dày không có lợi: acc phụ twscrape có hạn mức request, và video cần
 thời gian mới thấy được đà tăng.
