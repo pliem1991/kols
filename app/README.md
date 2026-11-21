@@ -95,10 +95,16 @@ Giờ ICT. ICT = US Eastern **+12h**, nên hai cửa sổ này là lúc Mỹ đa
 | Cửa sổ | Giờ ICT | Giờ ET | Làm gì |
 |---|---|---|---|
 | morning | 07:30–09:30 | 19:30–21:30 | 1 bài gốc + thread của ngày |
-| evening | 20:00–23:30 | 08:00–11:30 | 3 bài gốc |
+| midday | 11:00–13:00 | 23:00–01:00 | 1 bài gốc |
+| evening | 20:00–23:30 | 08:00–11:30 | 1 bài gốc |
 
-Reply chạy trong cùng hai cửa sổ, cách nhau 4–12 phút, tối đa 25/ngày và 2/tác
-giả/ngày. Ngoài cửa sổ app ngủ 4–7 phút mỗi vòng và không làm gì.
+Tổng 3 bài gốc + 1 thread mỗi ngày (hạ từ 7 xuống 5 rồi xuống 3 trong ngày
+21/11). Cửa sổ `night` 00:00–02:30 đã bỏ. Số thật luôn lấy từ `config.WINDOWS`,
+bảng này chỉ để đọc.
+
+Reply chạy trong cả ba cửa sổ, cách nhau 4–12 phút, tối đa 10/ngày (hạ từ 35
+ngày 21/11) và 2/tác giả/ngày. Ngoài cửa sổ app vẫn quét reply nhưng thưa hơn,
+15–30 phút mỗi vòng.
 
 Ngoài bài gốc còn ba loại hành động khác:
 

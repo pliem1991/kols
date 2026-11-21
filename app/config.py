@@ -56,11 +56,22 @@ class Window:
 #   · 00-06h ICT là chỗ KOL tập trung nhất (148/282 bài) — giờ Mỹ hoạt động
 #     thật, 13:00-19:00 ET.
 # Chủ dự án chốt 15/11: không dời khung cũ, thêm khung mới và tăng số bài.
+#
+# Hạ hai lần trong ngày 21/11 theo yêu cầu chủ dự án: 7 bài/ngày -> 5 -> 3.
+# Cắt theo số đo ở trên, không cắt đều:
+#   · evening 20-23h là khung view THẤP NHẤT: 3 -> 1, nhưng phải còn >= 1 vì
+#     nhánh tự RT bài cũ trong runner.py đòi "đã có bài mới trong evening".
+#   · night 00-02:30h bỏ hẳn khỏi danh sách, không để posts=0: cổng quote là
+#     "đã đủ bài gốc của cửa sổ" nên posts=0 làm night thành cửa sổ chỉ quote,
+#     tức là vẫn đăng. Bỏ cửa sổ thì khung đó app ngủ thật. Reply không mất gì:
+#     ngoài cửa sổ vẫn quét, chỉ thưa hơn (REPLY_GAP_OFF_WINDOW_MIN).
+#   · giữ morning (bài + thread, khung chất lượng nhất) và midday (11-18h ICT
+#     median 22.300 view, cao nhất).
+# Còn 3 bài gốc + 1 thread, cộng tối đa 2 quote và 1 RT.
 WINDOWS: tuple[Window, ...] = (
-    Window("night", dtime(0, 0), dtime(2, 30), posts=2),
     Window("morning", dtime(7, 30), dtime(9, 30), posts=1, thread=True),
     Window("midday", dtime(11, 0), dtime(13, 0), posts=1),
-    Window("evening", dtime(20, 0), dtime(23, 30), posts=3),
+    Window("evening", dtime(20, 0), dtime(23, 30), posts=1),
 )
 
 POST_GAP_MIN = (45, 90)            # phút, giãn cách giữa 2 bài gốc
@@ -84,7 +95,11 @@ MENTION_WINDOW_MIN = int(os.environ.get("XKOLS_MENTION_WINDOW", "1440"))
 # cả 3 đều đã bị nhánh reply TỰ ĐỘNG lấy mất trước đó -> hàng đợi làm tay rỗng.
 MANUAL_WINDOW_MIN = int(os.environ.get("XKOLS_MANUAL_WINDOW", "360"))
 
-MAX_REPLIES_PER_DAY = 35
+# Hạ 35 -> 20 -> 10 trong ngày 21/11 theo yêu cầu chủ dự án. Ngày 17/11 chạm
+# 32/35, tức là trần cũ gần như chính là mức chạy thật, nên đây là giảm thật
+# chứ không phải con số trang trí. Reply tay cũng tính chung vào trần này, nên
+# ở mức 10 thì nên để dành phần lớn cho tay.
+MAX_REPLIES_PER_DAY = 10
 # Trần reply cho MỘT tác giả trong một ngày, tính CẢ máy lẫn tay. Người ngoài
 # nhìn vào chỉ thấy một tài khoản trả lời, không phân biệt ai bấm nút. Chủ dự
 # án chốt 3 ngày 16/11 sau khi thấy hàng đợi ra hai mục @CrewWatcherX, rồi hạ

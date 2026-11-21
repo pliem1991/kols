@@ -12,7 +12,7 @@ from pathlib import Path
 
 import dashkit
 
-from . import data, followers
+from . import data, followers, viral_view
 
 ROOT = Path(__file__).resolve().parent  # XKols/fb
 PORT = 8788          # X giữ 8787
@@ -27,7 +27,8 @@ function head(d){
     foot:'FBKols',
     chips: st + '<span class="chip">model <b>'+esc(d.model)+'</b></span>'
       + '<span class="chip"><b>'+esc(d.now)+'</b></span>',
-    badges:{runs:d.runs.length, errors:d.errors_today||'', friends:d.f_today||''}};
+    badges:{runs:d.runs.length, errors:d.errors_today||'', friends:d.f_today||'',
+            viral:(d.viral&&d.viral.videos||[]).filter(v=>(v.status||'moi')==='moi').length||''}};
 }
 document.head.insertAdjacentHTML('beforeend', '<style>'
   + '#app{max-width:1180px}'
@@ -412,10 +413,15 @@ def main() -> None:
              dashkit.Nav("cost", "Chi phí AI"),
              dashkit.Nav("errors", "Lỗi", badge=True),
              dashkit.Nav("friends", "Kết bạn", badge=True),
-             dashkit.Nav("groups", "Group & bài")],
-        app_js=JS, state=lambda: {**data.state(), "fol": followers.state()}, gate=gate, port=PORT, poll_ms=10000,
+             dashkit.Nav("groups", "Group & bài"),
+             dashkit.Nav("viral", "Video viral X", badge=True)],
+        app_js=JS + viral_view.JS,
+        state=lambda: {**data.state(), "fol": followers.state(),
+                       "viral": viral_view.state()},
+        gate=gate, port=PORT, poll_ms=10000,
     )
     dash.posts["/api/followers"] = followers.add_manual
+    dash.posts["/api/viral"] = viral_view.set_status
     url = dashkit.serve(dash)
     gate.password()  # lần đầu tự sinh và ghi vào tools/web.env
     print(f"FBKols: {url}  (mật khẩu trong {ROOT / 'fb.env'}, khóa FBKOLS_WEB_PASS)", flush=True)

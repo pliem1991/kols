@@ -16,9 +16,9 @@ def check(name, cond, extra=""):
         fail.append(name)
 
 print("1) cua so lich theo gio ICT")
-# Bon cua so tu 15/11: night 00:00-02:30, morning 07:30-09:30,
-# midday 11:00-13:00, evening 20:00-23:30.
-cases = [("01:00", "night"), ("03:00", None), ("07:00", None),
+# Ba cua so tu 21/11: morning 07:30-09:30, midday 11:00-13:00,
+# evening 20:00-23:30. Cua so night 00:00-02:30 da bo.
+cases = [("01:00", None), ("03:00", None), ("07:00", None),
          ("08:00", "morning"), ("09:30", "morning"), ("10:30", None),
          ("12:00", "midday"), ("14:30", None), ("19:59", None),
          ("20:00", "evening"), ("23:30", "evening"), ("23:31", None)]
@@ -32,7 +32,7 @@ for hhmm, want in cases:
 print("\n2) tong so bai/ngay")
 total = sum(w.posts for w in config.WINDOWS)
 threads = sum(1 for w in config.WINDOWS if w.thread)
-check("7 bai goc", total == 7, f"= {total}")
+check("3 bai goc", total == 3, f"= {total}")
 check("1 thread", threads == 1, f"= {threads}")
 
 print("\n3) validate noi dung")
