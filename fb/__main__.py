@@ -425,9 +425,11 @@ def main() -> None:
     url = dashkit.serve(dash)
     gate.password()  # lần đầu tự sinh và ghi vào tools/web.env
     print(f"FBKols: {url}  (mật khẩu trong {ROOT / 'fb.env'}, khóa FBKOLS_WEB_PASS)", flush=True)
+    print(f"quét video viral X: {viral_view.HOURS_TEXT} mỗi ngày", flush=True)
     try:
         while True:
-            time.sleep(3600)
+            viral_view.scan_if_due()
+            time.sleep(300)
     except KeyboardInterrupt:
         pass
 

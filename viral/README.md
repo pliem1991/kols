@@ -68,16 +68,19 @@ Lọc theo chủ đề và trạng thái, bấm nút đổi trạng thái là gh
 
 ## Chạy định kỳ
 
-Nằm trong vòng lặp của bot XKols (`app/runner.py`), **không** dùng Task
-Scheduler của Windows và **không** dùng scheduler của Claude. Hai lượt mỗi
-ngày, 09:00 và 20:00 — đổi ở `scan.HOURS`.
+Do **bot Facebook** giữ, không phải bot X: tiến trình `python -m fb` (trang
+8788) kiểm mỗi 5 phút, đến giờ thì quét. Hai lượt mỗi ngày, 09:00 và 20:00 —
+đổi ở `scan.HOURS`. Không dùng Task Scheduler của Windows, không dùng
+scheduler của Claude.
 
-Mốc lượt cuối ghi ra `viral/.last_scan` chứ không giữ trong bộ nhớ: bot khởi
-động lại vài lần một ngày là chuyện thường, giữ trong bộ nhớ thì mỗi lần bật
-lại quét thêm một lượt thừa.
+Chủ dự án chốt 21/11: phần video viral thuộc về bên Facebook, nên lịch và logic
+đều nằm bên đó. Bot X bật hay tắt không ảnh hưởng.
 
-Bot tắt thì không có lượt quét nào. Đó là cái giá của việc bỏ Task Scheduler:
-đổi lấy chỗ một chỗ duy nhất để bật tắt và một dòng log chung.
+Quét chạy trong thread riêng (một lượt mất 20-40 giây) và có khoá chống chồng
+lượt. Lỗi quét được nuốt tại chỗ, trang 8788 không chết theo.
+
+Mốc lượt cuối ghi ra `viral/.last_scan` chứ không giữ trong bộ nhớ: tiến trình
+khởi động lại thì mỗi lần bật lại sẽ quét thêm một lượt thừa.
 
 Chạy tay một lượt bất cứ lúc nào vẫn được bằng `python -m viral` — nó không
 xét giờ, quét ngay.

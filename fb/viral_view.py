@@ -1,24 +1,56 @@
-"""Tab "Video viral X" trên trang 8788.
+"""Tab "Video viral X" trên trang 8788, kèm lịch quét.
 
-Chỉ hiển thị và đổi trạng thái. Việc quét nằm bên `viral/` (chạy riêng bằng
-`python -m viral`), trang này chỉ đọc viral/videos.json.
+Chủ dự án chốt 21/11: phần này thuộc về bot Facebook, không phải bot X. Nên
+TIẾN TRÌNH NÀY giữ lịch quét — `python -m fb` chạy là có quét, bot X tắt hay
+bật không liên quan.
 
-Để riêng file, không nhét vào fb/__main__.py, vì phần JS đã dài sẵn.
+Thuật toán tìm video nằm ở `viral/` (package dùng chung, không nằm trong app/
+của X). Ở đây chỉ có: gọi quét khi đến giờ, và vẽ tab.
 """
 from __future__ import annotations
 
+import asyncio
 import sys
+import threading
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from viral import store  # noqa: E402
+from viral import scan, store  # noqa: E402
+
+HOURS_TEXT = " và ".join(f"{h}:00" for h in scan.HOURS)
+_BUSY = threading.Lock()
 
 
 def state() -> dict:
     return store.state()
+
+
+def scan_if_due(now: datetime | None = None) -> None:
+    """Đến giờ thì quét một lượt. Gọi từ vòng lặp của fb/__main__.py.
+
+    Chạy trong một thread riêng: một lượt quét mất 20-40 giây, mà vòng lặp
+    chính còn phải phục vụ trang web. Khoá _BUSY để hai lượt không chồng nhau
+    nếu lượt trước chạy lâu hơn nhịp kiểm tra.
+    """
+    if not scan.due(now) or _BUSY.locked():
+        return
+
+    def work() -> None:
+        with _BUSY:
+            try:
+                r = asyncio.run(scan.run())
+                print(f"[{datetime.now():%H:%M:%S}] video viral: thêm "
+                      f"{r['them']} mới, cập nhật {r['capnhat']} cũ", flush=True)
+            except Exception as e:
+                # Mất một lượt quét không đáng để trang theo dõi chết theo.
+                print(f"[{datetime.now():%H:%M:%S}] quét video viral lỗi: "
+                      f"{type(e).__name__}: {e}", flush=True)
+
+    threading.Thread(target=work, daemon=True).start()
 
 
 def set_status(q: dict[str, list[str]]) -> dict:
