@@ -12,7 +12,7 @@ from pathlib import Path
 
 import dashkit
 
-from . import data, followers, viral_view
+from . import chay_ngay, data, followers, viral_view
 
 ROOT = Path(__file__).resolve().parent  # XKols/fb
 PORT = 8788          # X giữ 8787
@@ -74,6 +74,10 @@ document.head.insertAdjacentHTML('beforeend', '<style>'
   + '.sch{display:grid;grid-template-columns:repeat(auto-fill,minmax(62px,1fr));gap:6px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}'
   + '.sch h3{grid-column:1/-1;margin:0 0 2px;font-size:12.5px;font-weight:600;color:var(--mut)}'
   + '.sch .s{border:1px solid var(--line);border-radius:8px;padding:5px 4px;text-align:center;line-height:1.25}'
+  + '.btn{border:1px solid var(--line);background:none;border-radius:8px;padding:6px 13px;'
+  +   'font:inherit;font-size:13px;color:inherit;cursor:pointer}'
+  + '.btn:hover:not(:disabled){border-color:var(--acc);color:var(--acc)}'
+  + '.btn:disabled{opacity:.45;cursor:default}'
   + '.sch .s b{display:block;font-size:13.5px}.sch .s small{display:block;font-size:10.5px;color:var(--mut);white-space:nowrap}'
   + '.sch .s.done{background:var(--line);opacity:.55}.sch .s.done b{font-weight:500}'
   + '.sch .s.missed{opacity:.55;border-style:dashed}'
@@ -189,6 +193,27 @@ function schedTxt(d){
     return '<div class="s '+cls+'" title="'+esc(tip)+'"><b>'+s.at+'</b><small>'+sub+'</small></div>';
   }).join('') + '</div>';
 }
+let CHEO_MSG = '';
+async function cheoRun(){
+  const b = document.getElementById('cheo_run');
+  if(b){ b.disabled = true; b.textContent = 'đang bật…'; }
+  CHEO_MSG = '';
+  try{
+    const r = await (await fetch('/api/cheo/run', {method:'POST'})).json();
+    CHEO_MSG = (r.ok ? '<span class="ok">✓ </span>' : '<span class="bad">✗ </span>')
+             + esc(r.msg || r.why || 'không rõ kết quả');
+  }catch(e){ CHEO_MSG = '<span class="bad">✗ không gọi được server</span>'; }
+  load();
+}
+function runBtn(d){
+  const off = d.lock ? 'bot đang khóa' : d.run_lock ? 'đang có lượt chạy'
+            : d.chrome_open ? 'Chrome bot đang mở' : '';
+  return '<div style="margin-top:12px">'
+    + '<button class="btn" id="cheo_run" onclick="cheoRun()"'+(off?' disabled':'')+'>Chạy ngay</button>'
+    + (off ? ' <span class="mut">' + off + '</span>' : '')
+    + (CHEO_MSG ? '<div class="mut" style="margin-top:7px;font-size:12.5px">'+CHEO_MSG+'</div>' : '')
+    + '</div>';
+}
 function v_overview(d){
   const L = d.limits;
   let h = '';
@@ -227,7 +252,7 @@ function v_overview(d){
     + '<span>Câu kế</span><span>'+esc(d.phrase_next)+'</span>'
     + '<span>Mỗi lượt</span><span>'+L.run_min+'–'+L.run_max+' comment · '+L.groups_per_run+' group</span>'
     + '<span>Kết bạn</span><span>≥'+L.mutual+' bạn chung<br>11–14h tối đa 2 · 19–22h đủ '+L.friends+'</span>'
-    + '</div>'+schedTxt(d)+'</div></div>';
+    + '</div>'+runBtn(d)+schedTxt(d)+'</div></div>';
   return h;
 }
 function tk(n){ return n>=1e6 ? (n/1e6).toFixed(2)+'M' : n>=1e3 ? Math.round(n/1e3)+'K' : String(n||0); }
@@ -422,6 +447,7 @@ def main() -> None:
     )
     dash.posts["/api/followers"] = followers.add_manual
     dash.posts["/api/viral"] = viral_view.set_status
+    dash.posts["/api/cheo/run"] = chay_ngay.run
     url = dashkit.serve(dash)
     gate.password()  # lần đầu tự sinh và ghi vào tools/web.env
     print(f"FBKols: {url}  (mật khẩu trong {ROOT / 'fb.env'}, khóa FBKOLS_WEB_PASS)", flush=True)

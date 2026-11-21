@@ -37,3 +37,5 @@ STOP
 fb/data/
 viral/.last_scan
 viral/quet.log
+fb/fb.log
+fb/fb.err.log

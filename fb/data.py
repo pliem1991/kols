@@ -258,12 +258,7 @@ def state() -> dict:
     hist = [{"date": r[0], "comments": r[1], "friends": r[2], "runs": r[3], "errors": r[4], "cost": r[5]}
             for r in daily_s[-14:]]
 
-    lock = None
-    if (CHEO / "dung-khan-cap.txt").exists():
-        try:
-            lock = (CHEO / "dung-khan-cap.txt").read_text(encoding="utf-8").strip()[:500] or "(trống)"
-        except OSError:
-            lock = "(không đọc được)"
+    lock = state_lock()
 
     groups = st.get("groups", [])
     gi = st.get("next_group_index", 0)
@@ -301,6 +296,7 @@ def state() -> dict:
         "limits": lim,
         "lock": lock,
         "chrome_open": copen,
+        "run_lock": run_lock(),
         "c_today": c_today, "f_today": f_today,
         "errors_today": sum(1 for e in errors if e["at"].startswith(today)),
         "cost_today": round(sum(r["cost"] for r in runs if r["date"] == today), 4),
@@ -322,3 +318,44 @@ def state() -> dict:
         "posts_total": len(st.get("commented_posts", [])),
         "friend_window": "11:00–13:59 (tối đa 2) và 19:00–21:59 (đủ %d)" % lim["friends"],
     }
+
+
+def _pid_alive(pid: int) -> bool:
+    """Tiến trình còn sống? Giống _pid_alive() trong bot.py của cheo."""
+    import ctypes
+    k = ctypes.windll.kernel32
+    h = k.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return False
+    try:
+        code = ctypes.c_ulong()
+        return bool(k.GetExitCodeProcess(h, ctypes.byref(code))) and code.value == 259
+    finally:
+        k.CloseHandle(h)
+
+
+def run_lock() -> dict | None:
+    """Đang có một lượt bot chạy? Đọc cheo/dang-chay.lock, cùng luật với bot.py:
+    pid còn sống và file chưa quá 3 giờ thì mới coi là đang chạy."""
+    f = CHEO / "dang-chay.lock"
+    if not f.exists():
+        return None
+    try:
+        pid = int(f.read_text(encoding="utf-8").strip() or 0)
+        old_min = int((time.time() - f.stat().st_mtime) // 60)
+    except (OSError, ValueError):
+        return None
+    if not pid or old_min > 180 or not _pid_alive(pid):
+        return None  # khóa hỏng, bot sẽ tự lấy lại
+    return {"pid": pid, "min": old_min}
+
+
+def state_lock() -> str | None:
+    """Nội dung dung-khan-cap.txt nếu bot đang tự khóa."""
+    f = CHEO / "dung-khan-cap.txt"
+    if not f.exists():
+        return None
+    try:
+        return f.read_text(encoding="utf-8").strip()[:500] or "(trống)"
+    except OSError:
+        return "(không đọc được)"
